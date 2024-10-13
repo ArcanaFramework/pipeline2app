@@ -58,35 +58,35 @@ class ContainerCommand:
     """
 
     STORE_TYPE = "file_system"
-    AXES = None
+    AXES: ty.Optional[ty.Type[Axes]] = None
 
     task: pydra.engine.task.TaskBase = attrs.field(
-        converter=ClassResolver(
+        converter=ClassResolver(  # type: ignore[misc]
             TaskBase, alternative_types=[ty.Callable], package=PACKAGE_NAME
         )
     )
     row_frequency: ty.Optional[Axes] = None
     inputs: ty.List[CommandInput] = attrs.field(
         factory=list,
-        converter=ObjectListConverter(CommandInput),
+        converter=ObjectListConverter(CommandInput),  # type: ignore[misc]
         metadata={"serializer": ObjectListConverter.asdict},
     )
     outputs: ty.List[CommandOutput] = attrs.field(
         factory=list,
-        converter=ObjectListConverter(CommandOutput),
+        converter=ObjectListConverter(CommandOutput),  # type: ignore[misc]
         metadata={"serializer": ObjectListConverter.asdict},
     )
     parameters: ty.List[CommandParameter] = attrs.field(
         factory=list,
-        converter=ObjectListConverter(CommandParameter),
+        converter=ObjectListConverter(CommandParameter),  # type: ignore[misc]
         metadata={"serializer": ObjectListConverter.asdict},
     )
     configuration: ty.Dict[str, ty.Any] = attrs.field(
-        factory=dict, converter=default_if_none(dict)
+        factory=dict, converter=default_if_none(dict)  # type: ignore[misc]
     )
     image: ty.Optional[App] = None
 
-    def __attrs_post_init__(self):
+    def __attrs_post_init__(self) -> None:
         if isinstance(self.row_frequency, Axes):
             pass
         elif isinstance(self.row_frequency, str):
@@ -109,18 +109,30 @@ class ContainerCommand:
             )
 
     @property
-    def name(self):
+    def name(self) -> str:
         if self.image is None:
             raise RuntimeError(
                 f"Cannot access name of unbound container commands {self}"
             )
         return self.image.name
 
+    def input(self, name: str) -> CommandInput:
+        try:
+            return next(i for i in self.inputs if i.name == name)
+        except StopIteration:
+            raise KeyError(f"{self!r} doesn't have an output named '{name}")
+
+    def output(self, name: str) -> CommandOutput:
+        try:
+            return next(o for o in self.outputs if o.name == name)
+        except StopIteration:
+            raise KeyError(f"{self!r} doesn't have an output named '{name}")
+
     @property
-    def axes(self):
+    def axes(self) -> ty.Type[Axes]:
         return type(self.row_frequency)
 
-    def configuration_args(self):
+    def configuration_args(self) -> ty.List[str]:
 
         # Set up fixed arguments used to configure the workflow at initialisation
         cmd_args = []
@@ -131,31 +143,32 @@ class ContainerCommand:
 
         return cmd_args
 
-    def license_args(self):
+    def license_args(self) -> ty.List[str]:
         cmd_args = []
-        for lic_name, lic in self.image.licenses.items():
-            if lic.source is None:
-                cmd_args.append(f"--download-license {lic_name} {lic.destination}")
+        if self.image:
+            for lic_name, lic in self.image.licenses.items():
+                if lic.source is None:
+                    cmd_args.append(f"--download-license {lic_name} {lic.destination}")
         return cmd_args
 
     def execute(
         self,
         address: str,
-        input_values: ty.Dict[str, str] = None,
-        output_values: ty.Dict[str, str] = None,
-        parameter_values: ty.Dict[str, ty.Any] = None,
+        input_values: ty.Optional[ty.Dict[str, str]] = None,
+        output_values: ty.Optional[ty.Dict[str, str]] = None,
+        parameter_values: ty.Optional[ty.Dict[str, ty.Any]] = None,
         work_dir: ty.Optional[Path] = None,
-        ids: ty.List[str] = None,
+        ids: ty.Union[ty.List[str], str, None] = None,
         dataset_hierarchy: ty.Optional[str] = None,
         dataset_name: ty.Optional[str] = None,
         overwrite: bool = False,
         loglevel: str = "warning",
         plugin: ty.Optional[str] = None,
-        export_work: Path = False,
+        export_work: ty.Optional[Path] = None,
         raise_errors: bool = False,
-        keep_running_on_errors=False,
+        keep_running_on_errors: bool = False,
         pipeline_name: ty.Optional[str] = None,
-    ):
+    ) -> None:
         """Runs the command within the entrypoint of the container image.
 
         Performs a number of steps in one long pipeline that would typically be done
@@ -195,7 +208,7 @@ class ContainerCommand:
             the name to give to the pipeline, defaults to the name of the command image
         """
 
-        if type(export_work) is bytes:
+        if isinstance(export_work, bytes):
             export_work = Path(export_work.decode("utf-8"))
 
         if loglevel != "none":
@@ -204,7 +217,7 @@ class ContainerCommand:
             )
 
         if work_dir is None:
-            work_dir = tempfile.mkdtemp()
+            work_dir = Path(tempfile.mkdtemp())
 
         if pipeline_name is None:
             pipeline_name = self.name
@@ -231,21 +244,13 @@ class ContainerCommand:
 
         input_configs = []
         converter_args = {}  # Arguments passed to converter
-        for inpt in self.inputs:
-            if not input_values[inpt.name] and inpt.datatype != DataRow:
-                logger.warning(
-                    f"Skipping '{inpt.name}' source column as no input was provided"
-                )
+        pipeline_inputs = []
+        for input_name, input_path in input_values.items():
+            if not input_path:
+                logger.info("No value provided for input '%s', skipping", input_name)
                 continue
-            if inpt.datatype is DataRow:
-                logger.info(
-                    f"No column added for '{inpt.name}' column as it uses built-in "
-                    "type `frametree.core.row.DataRow`"
-                )
-                continue
-            path, qualifiers = self.extract_qualifiers_from_path(
-                input_values[inpt.name]
-            )
+            inpt = self.input(input_name)
+            path, qualifiers = self.extract_qualifiers_from_path(input_path)
             source_kwargs = qualifiers.pop("criteria", {})
             converter_args[inpt.name] = qualifiers.pop("converter", {})
             if qualifiers:
@@ -253,13 +258,13 @@ class ContainerCommand:
                     "Unrecognised qualifier namespaces extracted from path for "
                     f"{inpt.name} (expected ['criteria', 'converter']): {qualifiers}"
                 )
-            if inpt.name in dataset.columns:
-                column = dataset[inpt.name]
+            if input_path in dataset.columns:
+                column = dataset[path]
                 logger.info(f"Found existing source column {column}")
             else:
-                logger.info(f"Adding new source column '{inpt.name}'")
-                dataset.add_source(
-                    name=inpt.name,
+                logger.info(f"Adding new source column '{input_name}'")
+                column = dataset.add_source(
+                    name=input_name,
                     datatype=inpt.column_defaults.datatype,
                     path=path,
                     is_regex=True,
@@ -267,36 +272,44 @@ class ContainerCommand:
                 )
             if input_config := inpt.config_dict:
                 input_configs.append(input_config)
+            pipeline_inputs.append((column.name, inpt.field, inpt.datatype))
+
+        pipeline_inputs.extend(i for i in self.inputs if i.datatype is DataRow)
 
         output_configs = []
-        for output in self.outputs:
-            path, qualifiers = self.extract_qualifiers_from_path(
-                output_values.get(output.name, output.name)
-            )
+        pipeline_outputs = []
+        for output_name, output_path in output_values.items():
+            output = self.output(output_name)
+            if not output_path:
+                logger.info("No value provided for output '%s', skipping", output_name)
+                continue
+            path, qualifiers = self.extract_qualifiers_from_path(output_path)
             if "@" not in path:
                 path = f"{path}@{dataset.name}"  # Add dataset namespace
-            converter_args[output.name] = qualifiers.pop("converter", {})
+            sink_name = path.split("@")[0]
+            converter_args[sink_name] = qualifiers.pop("converter", {})
             if qualifiers:
                 raise Pipeline2appUsageError(
                     "Unrecognised qualifier namespaces extracted from path for "
-                    f"{output.name} (expected ['criteria', 'converter']): {qualifiers}"
+                    f"{output_name} (expected ['criteria', 'converter']): {qualifiers}"
                 )
-            if output.name in dataset.columns:
-                column = dataset[output.name]
+            if sink_name in dataset.columns:
+                column = dataset[sink_name]
                 if not column.is_sink:
                     raise Pipeline2appUsageError(
-                        f"Output column name '{output.name}' shadows existing source column"
+                        f"Output column name '{sink_name}' shadows existing source column"
                     )
                 logger.info(f"Found existing sink column {column}")
             else:
-                logger.info(f"Adding new source column '{output.name}'")
+                logger.info(f"Adding new source column '{sink_name}'")
                 dataset.add_sink(
-                    name=output.name,
+                    name=sink_name,
                     datatype=output.column_defaults.datatype,
                     path=path,
                 )
             if output_config := output.config_dict:
                 output_configs.append(output_config)
+            pipeline_outputs.append((sink_name, output.field, output.datatype))
 
         dataset.save()  # Save definitions of the newly added columns
 
@@ -361,8 +374,8 @@ class ContainerCommand:
             pipeline = dataset.apply(
                 pipeline_name,
                 task,
-                inputs=self.inputs,
-                outputs=self.outputs,
+                inputs=pipeline_inputs,
+                outputs=pipeline_outputs,
                 row_frequency=self.row_frequency,
                 overwrite=overwrite,
                 converter_args=converter_args,
@@ -371,7 +384,7 @@ class ContainerCommand:
         # Instantiate the Pydra workflow
         wf = pipeline(cache_dir=pipeline_cache_dir)
 
-        if ids is not None:
+        if isinstance(ids, str):
             ids = ids.split(",")
 
         # execute the workflow
@@ -411,7 +424,9 @@ class ContainerCommand:
                 sys.exit(1)
 
     @classmethod
-    def extract_qualifiers_from_path(cls, user_input: str):
+    def extract_qualifiers_from_path(
+        cls, user_input: str
+    ) -> ty.Tuple[str, ty.Dict[str, ty.Any]]:
         """Extracts out "qualifiers" from the user-inputted paths. These are
         in the form 'path ns1.arg1=val1 ns1.arg2=val2, ns2.arg1=val3...
 
@@ -429,7 +444,7 @@ class ContainerCommand:
         qualifiers : defaultdict[dict]
             the extracted qualifiers
         """
-        qualifiers = defaultdict(dict)
+        qualifiers: ty.Dict[str, ty.Any] = defaultdict(dict)
         if "=" in user_input:  # Treat user input as containing qualifiers
             parts = re.findall(r'(?:[^\s"]|"(?:\\.|[^"])*")+', user_input)
             path = parts[0].strip('"')
@@ -459,9 +474,9 @@ class ContainerCommand:
         self,
         address: str,
         cache_dir: Path,
-        dataset_hierarchy: str,
-        dataset_name: str,
-    ):
+        dataset_hierarchy: ty.Optional[str],
+        dataset_name: ty.Optional[str],
+    ) -> FrameSet:
         """Loads a dataset from within an image, to be used in image entrypoints
 
         Parameters

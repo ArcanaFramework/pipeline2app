@@ -131,9 +131,9 @@ def pydra_task(request):
 DATA_STORES = ["file_system", "mock_remote"]
 
 
-@pytest.fixture
-def frametree_home(work_dir):
-    frametree_home = work_dir / "frametree-home"
+@pytest.fixture(scope="session")
+def frametree_home() -> Path:
+    frametree_home = Path(mkdtemp()) / "frametree-home"
     with patch.dict(os.environ, {"FRAMETREE_HOME": str(frametree_home)}):
         yield frametree_home
 
