@@ -61,13 +61,13 @@ def test_command_execute(concatenate_task, saved_dataset, work_dir):
         row_frequency=bp.axes.default(),
         inputs=[
             {
-                "name": "source_1",
+                "name": "first_file",
                 "datatype": "text/text-file",
                 "field": "in_file1",
                 "help": "dummy",
             },
             {
-                "name": "source_2",
+                "name": "second_file",
                 "datatype": "text/text-file",
                 "field": "in_file2",
                 "help": "dummy",
@@ -75,7 +75,7 @@ def test_command_execute(concatenate_task, saved_dataset, work_dir):
         ],
         outputs=[
             {
-                "name": "sink_1",
+                "name": "concatenated",
                 "datatype": "text/text-file",
                 "field": "out_file",
                 "help": "dummy",
@@ -95,11 +95,11 @@ def test_command_execute(concatenate_task, saved_dataset, work_dir):
     command_spec.execute(
         address=saved_dataset.locator,
         input_values=[
-            ("source_1", "file1"),
-            ("source_2", "file2"),
+            ("first_file", "file1"),
+            ("second_file", "file2"),
         ],
         output_values=[
-            ("sink_1", "concatenated"),
+            ("concatenated", "sink_1"),
         ],
         parameter_values=[
             ("duplicates", str(duplicates)),
@@ -112,9 +112,7 @@ def test_command_execute(concatenate_task, saved_dataset, work_dir):
         pipeline_name="test_pipeline",
     )
     # Add source column to saved dataset
-    reloaded = saved_dataset.store.load_frameset(
-        saved_dataset.id, name=saved_dataset.name
-    )
+    reloaded = saved_dataset.reload()
     sink = reloaded["sink_1"]
     assert len(sink) == reduce(mul, bp.dim_lengths)
     fnames = ["file1.txt", "file2.txt"]
@@ -137,13 +135,13 @@ def test_command_execute_fail(concatenate_task, saved_dataset, work_dir):
         row_frequency=bp.axes.default(),
         inputs=[
             {
-                "name": "source1",
+                "name": "file1",
                 "datatype": "text/text-file",
                 "field": "in_file1",
                 "help": "dummy",
             },
             {
-                "name": "source2",
+                "name": "file2",
                 "datatype": "text/text-file",
                 "field": "in_file2",
                 "help": "dummy",
@@ -151,7 +149,7 @@ def test_command_execute_fail(concatenate_task, saved_dataset, work_dir):
         ],
         outputs=[
             {
-                "name": "sink1",
+                "name": "concatenated",
                 "datatype": "text/text-file",
                 "field": "out_file",
                 "help": "dummy",
@@ -173,11 +171,11 @@ def test_command_execute_fail(concatenate_task, saved_dataset, work_dir):
         command_spec.execute(
             address=saved_dataset.locator,
             input_values=[
-                ("source1", "bad-file-path"),
-                ("source2", "file1"),
+                ("file1", "bad-file-path"),
+                ("file2", "file1"),
             ],
             output_values=[
-                ("sink1", "concatenated"),
+                ("concatenated", "sink1"),
             ],
             parameter_values=[
                 ("duplicates", duplicates),
@@ -264,7 +262,7 @@ def test_command_execute_with_converter_args(
         row_frequency=bp.axes.default(),
         inputs=[
             {
-                "name": "source",
+                "name": "input_file",
                 "datatype": "testing/encoded-text",
                 "column_defaults": {"datatype": "text/text-file"},
                 "field": "in_file",
@@ -273,13 +271,13 @@ def test_command_execute_with_converter_args(
         ],
         outputs=[
             {
-                "name": "sink1",
+                "name": "first_output_file",
                 "datatype": "testing/encoded-text",
                 "field": "out",
                 "help": "dummy",
             },
             {
-                "name": "sink2",
+                "name": "second_output_file",
                 "datatype": "testing/encoded-text",
                 "column_defaults": {"datatype": "text/text-file"},
                 "field": "out",
@@ -291,11 +289,11 @@ def test_command_execute_with_converter_args(
     command_spec.execute(
         address=saved_dataset.locator,
         input_values=[
-            ("source", "file1 converter.shift=3"),
+            ("input_file", "file1 converter.shift=3"),
         ],
         output_values=[
-            ("sink1", "encoded"),
-            ("sink2", "decoded converter.shift=-3"),
+            ("first_output_file", "sink1"),
+            ("second_output_file", "sink2 converter.shift=-3"),
         ],
         raise_errors=True,
         plugin="serial",
@@ -305,13 +303,12 @@ def test_command_execute_with_converter_args(
         pipeline_name="test_pipeline",
     )
     # Add sink column to saved dataset to access data created by the executed command spec
-    saved_dataset.add_sink("sink1", EncodedText, path="encoded@")
-    saved_dataset.add_sink("sink2", TextFile, path="decoded@")
+    reloaded = saved_dataset.reload()
     unencoded_contents = "file1.txt"
     encoded_contents = (
         "iloh41w{w"  # 'file1.txt' characters shifted up by 3 in ASCII code
     )
-    for row in saved_dataset.rows(frequency="abcd"):
+    for row in reloaded.rows(frequency="abcd"):
         enc_cell = row.cell("sink1", allow_empty=False)
         dec_cell = row.cell("sink2", allow_empty=False)
         enc_item = enc_cell.item
