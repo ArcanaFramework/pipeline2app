@@ -82,7 +82,15 @@ def test_native_python_install(tmp_path):
     app.make(build_dir=tmp_path / "build-dir", use_local_packages=True)
 
     volume_mount = str(dataset_dir) + ":/dataset:rw"
-    args = ["/dataset", "--input", "dummy", "sample"]
+    args = [
+        "/dataset",
+        "--input",
+        "dummy",
+        "sample",
+        "--output",
+        OUTPUT_COL_NAME,
+        OUTPUT_COL_NAME,
+    ]
 
     dc = docker.from_env()
     try:

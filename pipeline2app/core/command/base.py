@@ -17,7 +17,7 @@ from frametree.core.serialize import (
     ObjectListConverter,
     ClassResolver,
 )
-from frametree.core.utils import show_workflow_errors
+from frametree.core.utils import show_workflow_errors, path2label
 from frametree.core.row import DataRow
 from frametree.core.frameset.base import FrameSet
 from frametree.core.store import Store
@@ -34,7 +34,7 @@ if ty.TYPE_CHECKING:
 logger = logging.getLogger("pipeline2app")
 
 
-@attrs.define(kw_only=True)
+@attrs.define(kw_only=True, auto_attribs=False)
 class ContainerCommand:
     """A definition of a command to be run within a container. A command wraps up a
     task or workflow to provide/configure a UI for convenient launching.
@@ -65,7 +65,7 @@ class ContainerCommand:
             TaskBase, alternative_types=[ty.Callable], package=PACKAGE_NAME
         )
     )
-    row_frequency: ty.Optional[Axes] = None
+    row_frequency: ty.Optional[Axes] = attrs.field(default=None)
     inputs: ty.List[CommandInput] = attrs.field(
         factory=list,
         converter=ObjectListConverter(CommandInput),  # type: ignore[misc]
@@ -84,7 +84,7 @@ class ContainerCommand:
     configuration: ty.Dict[str, ty.Any] = attrs.field(
         factory=dict, converter=default_if_none(dict)  # type: ignore[misc]
     )
-    image: ty.Optional[App] = None
+    image: ty.Optional[App] = attrs.field(default=None)
 
     def __attrs_post_init__(self) -> None:
         if isinstance(self.row_frequency, Axes):
@@ -127,6 +127,14 @@ class ContainerCommand:
             return next(o for o in self.outputs if o.name == name)
         except StopIteration:
             raise KeyError(f"{self!r} doesn't have an output named '{name}")
+
+    @property
+    def input_names(self) -> ty.List[str]:
+        return [i.name for i in self.inputs]
+
+    @property
+    def output_names(self) -> ty.List[str]:
+        return [o.name for o in self.outputs]
 
     @property
     def axes(self) -> ty.Type[Axes]:
@@ -276,6 +284,12 @@ class ContainerCommand:
 
         pipeline_inputs.extend(i for i in self.inputs if i.datatype is DataRow)
 
+        if not pipeline_inputs:
+            raise ValueError(
+                f"No input values provided to command {self.name} "
+                f"(available: {self.input_names})"
+            )
+
         output_configs = []
         pipeline_outputs = []
         for output_name, output_path in output_values.items():
@@ -286,7 +300,7 @@ class ContainerCommand:
             path, qualifiers = self.extract_qualifiers_from_path(output_path)
             if "@" not in path:
                 path = f"{path}@{dataset.name}"  # Add dataset namespace
-            sink_name = path.split("@")[0]
+            sink_name = path2label(path)
             converter_args[sink_name] = qualifiers.pop("converter", {})
             if qualifiers:
                 raise Pipeline2appUsageError(
@@ -310,6 +324,12 @@ class ContainerCommand:
             if output_config := output.config_dict:
                 output_configs.append(output_config)
             pipeline_outputs.append((sink_name, output.field, output.datatype))
+
+        if not pipeline_outputs and self.outputs:
+            raise ValueError(
+                f"No output values provided to command {self} "
+                f"(available: {self.output_names})"
+            )
 
         dataset.save()  # Save definitions of the newly added columns
 

@@ -232,9 +232,6 @@ def test_command_execute_on_row(cli_runner, work_dir):
     # Add source to loaded dataset
     command_spec.execute(
         address=dataset.locator,
-        input_values=[
-            ("a_row", ""),
-        ],
         raise_errors=True,
         plugin="serial",
         work_dir=str(work_dir),

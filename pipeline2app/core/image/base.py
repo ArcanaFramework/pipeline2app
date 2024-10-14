@@ -79,15 +79,15 @@ class P2AImage:
     schema_version: str = SCHEMA_VERSION
 
     @property
-    def reference(self):
+    def reference(self) -> str:
         return f"{self.path}:{self.tag}"
 
     @property
-    def tag(self):
+    def tag(self) -> str:
         return str(self.version)
 
     @property
-    def path(self):
+    def path(self) -> str:
         prefix = self.registry + "/" if self.registry != DOCKER_HUB else ""
         org_str = self.org + "/" if self.org else ""
         return (prefix + org_str + self.name).lower()
@@ -97,8 +97,8 @@ class P2AImage:
         build_dir: ty.Optional[Path] = None,
         generate_only: bool = False,
         no_cache: bool = False,
-        **kwargs,
-    ):
+        **kwargs: ty.Any,
+    ) -> None:
         """Makes the container image from the spec: generates the Dockerfile and then
         builds it.
 
@@ -130,7 +130,7 @@ class P2AImage:
         pipeline2app_install_extras: ty.List[str] = (),
         resources: ty.Optional[ty.Dict[str, Path]] = None,
         resources_dir: ty.Optional[Path] = None,
-        **kwargs,
+        **kwargs: ty.Any,
     ) -> DockerRenderer:
         """Constructs a dockerfile that wraps a with dependencies
 
@@ -209,7 +209,7 @@ class P2AImage:
         build_dir: Path,
         image_tag: str,
         no_cache: bool = False,
-    ):
+    ) -> None:
         """Builds the dockerfile in the specified build directory
 
         Parameters
@@ -242,7 +242,7 @@ class P2AImage:
             )
         logging.info("Successfully built docker image %s", image_tag)
 
-    def init_dockerfile(self):
+    def init_dockerfile(self) -> DockerRenderer:
         dockerfile = DockerRenderer(self.base_image.package_manager).from_(
             self.base_image.reference
         )
@@ -254,7 +254,7 @@ class P2AImage:
         build_dir: Path,
         resources: ty.Optional[ty.Dict[str, Path]],
         resources_dir: ty.Optional[Path],
-    ):
+    ) -> None:
         """Add static resources to the docker image"""
         if resources_dir is not None:
             all_resources = {
@@ -292,7 +292,9 @@ class P2AImage:
                 destination=resource.path,
             )
 
-    def add_labels(self, dockerfile, labels=None):
+    def add_labels(
+        self, dockerfile: DockerRenderer, labels: ty.Optional[ty.Dict[str, str]] = None
+    ) -> None:
         if labels is None:
             labels = self.labels
         if labels:
@@ -305,7 +307,7 @@ class P2AImage:
         use_local_packages: bool = False,
         pipeline2app_install_extras: ty.Iterable = (),
         pypi_fallback: bool = False,
-    ):
+    ) -> None:
         """Generate Neurodocker instructions to install an appropriate version of
         Python and the required Python packages
 
@@ -385,7 +387,7 @@ class P2AImage:
                 )
             )
 
-    def install_system_packages(self, dockerfile: DockerRenderer):
+    def install_system_packages(self, dockerfile: DockerRenderer) -> None:
         """Generate Neurodocker instructions to install systems packages in dockerfile
 
         Parameters
@@ -405,7 +407,7 @@ class P2AImage:
     def install_package_templates(
         self,
         dockerfile: DockerRenderer,
-    ):
+    ) -> None:
         """Install custom packages from Neurodocker package_templates
 
         Parameters
@@ -507,7 +509,7 @@ class P2AImage:
     #     built = build_package(local_installation, sdist_dir, ["sdist"])
     #     return sdist_dir / built[0]
 
-    def write_readme(self, dockerfile: DockerRenderer, build_dir):
+    def write_readme(self, dockerfile: DockerRenderer, build_dir: Path) -> None:
         """Generate Neurodocker instructions to install README file inside the docker
         image
 
@@ -525,16 +527,16 @@ class P2AImage:
             f.write(self.DOCKERFILE_README_TEMPLATE.format(__version__, self.readme))
         dockerfile.copy(source=["./README.md"], destination="/README.md")
 
-    def asdict(self):
+    def asdict(self) -> ty.Dict[str, ty.Any]:
         """Return a serialized version of the pipeline image specification that can be
         written to file"""
 
-        def filter(attr, value):
+        def filter(attr: attrs.Attribute, value: ty.Any) -> bool:
             return not isinstance(value, type(self)) and attr.metadata.get(
                 "asdict", True
             )
 
-        def serializer(_, attr, value):
+        def serializer(_: ty.Any, attr: attrs.Attribute, value: ty.Any) -> ty.Any:
             if attr is not None and "serializer" in attr.metadata:
                 value = attr.metadata["serializer"](
                     value,
