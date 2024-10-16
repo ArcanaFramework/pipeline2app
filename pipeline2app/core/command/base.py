@@ -522,7 +522,7 @@ class ContainerCommand:
             _description_
         """
         try:
-            dataset = FrameSet.load(address)
+            dataset = FrameSet.load(address, **kwargs)
         except KeyError:
 
             store_name, id, name = FrameSet.parse_id_str(address)
