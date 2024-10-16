@@ -256,11 +256,11 @@ def make(
     push,
     clean_up,
     resource: ty.List[ty.Tuple[str, str]],
-    resources_dir: Path | None,
+    resources_dir: ty.Optional[Path],
     spec_root: Path,
     source_package: ty.Sequence[Path],
     export_files: ty.Sequence[ty.Tuple[Path, Path]],
-):
+) -> None:
 
     if isinstance(spec_path, bytes):  # FIXME: This shouldn't be necessary
         spec_path = Path(spec_path.decode("utf-8"))
