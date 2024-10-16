@@ -18,7 +18,7 @@ logger = logging.getLogger("pipeline2app")
 class BaseImage:
 
     DEFAULT_IMAGE = "debian"
-    DEFAULT_IMAGE_TAG = "slim-bookworm"
+    DEFAULT_IMAGE_TAG = "bookworm-slim"
     DEFAULT_CONDA_ENV = "pipeline2app"
     DEFAULT_USER = "root"
 
@@ -30,7 +30,7 @@ class BaseImage:
     user: str = attrs.field(default=DEFAULT_USER)
 
     @property
-    def reference(self):
+    def reference(self) -> str:
         if self.tag:
             reference = f"{self.name}:{self.tag}"
         else:
@@ -38,7 +38,7 @@ class BaseImage:
         return reference
 
     @name.validator
-    def name_validator(self, _, name):
+    def name_validator(self, _: attrs.Attribute[str], name: str) -> None:
         if name == "alpine":
             raise ValueError(
                 "Neurodocker (the package used to build the images) does not currently "
@@ -46,7 +46,7 @@ class BaseImage:
             )
 
     @tag.default
-    def tag_default(self):
+    def tag_default(self) -> ty.Optional[str]:
         if self.name == self.DEFAULT_IMAGE:
             tag = self.DEFAULT_IMAGE_TAG
         else:
@@ -54,7 +54,7 @@ class BaseImage:
         return tag
 
     @package_manager.default
-    def package_manager_default(self):
+    def package_manager_default(self) -> ty.Optional[str]:
         if self.name in ("ubuntu", "debian"):
             package_manager = "apt"
         elif self.name in ("fedora", "centos"):
@@ -64,7 +64,9 @@ class BaseImage:
         return package_manager
 
     @package_manager.validator
-    def package_manager_validator(self, _, package_manager):
+    def package_manager_validator(
+        self, _: attrs.Attribute[ty.Optional[str]], package_manager: ty.Optional[str]
+    ) -> None:
         if package_manager is None:
             raise ValueError(
                 f"Package manager must be supplied explicitly for unknown base image "
@@ -78,7 +80,7 @@ class BaseImage:
             )
 
     @conda_env.default
-    def conda_env_default(self):
+    def conda_env_default(self) -> ty.Optional[str]:
         if self.python:
             conda_env = None
         else:
@@ -95,7 +97,7 @@ class Version:
     build: ty.Optional[str] = None
     prerelease: ty.Optional[str] = None
 
-    def __str__(self):
+    def __str__(self) -> str:
         tag = self.package
         if self.prerelease:
             tag += "-" + self.prerelease
@@ -103,7 +105,7 @@ class Version:
             tag += "-" + str(self.build)
         return tag
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         rpr = f"Version(package={self.package}"
         if self.build:
             rpr += f", build={self.build}"
@@ -111,7 +113,7 @@ class Version:
             rpr += f", prerelease={self.prerelease}"
         return rpr + ")"
 
-    def build_info(self):
+    def build_info(self) -> str:
         info = self.build if self.build else "0"
         if self.prerelease:
             info += f" ({self.prerelease})"
@@ -145,7 +147,7 @@ class Docs:
     )
 
     @info_url.validator
-    def info_url_validator(self, _, info_url):
+    def info_url_validator(self, _: attrs.Attribute[str], info_url: str) -> None:
         parsed = urlparse(info_url)
         if not parsed.scheme or not parsed.netloc:
             raise ValueError(
@@ -188,7 +190,7 @@ class License:
     store_in_image: bool = False
 
     @info_url.validator
-    def info_url_validator(self, _, info_url):
+    def info_url_validator(self, _: attrs.Attribute, info_url: str) -> None:
         parsed = urlparse(info_url)
         if not parsed.scheme or not parsed.netloc:
             raise ValueError(
@@ -204,7 +206,7 @@ class License:
     #         )
 
     @classmethod
-    def column_path(self, name):
+    def column_path(self, name: str) -> str:
         """The column name (and resource name) for the license if it is to be downloaded
         from the source dataset"""
         return name + self.COLUMN_SUFFIX + "@"
@@ -230,7 +232,9 @@ class PipPackage(BasePackage):
     extras: ty.List[str] = attrs.field(factory=list)
 
     @classmethod
-    def unique(cls, pip_specs: ty.Iterable, remove_pipeline2app: bool = False):
+    def unique(
+        cls, pip_specs: ty.Iterable[PipPackage], remove_pipeline2app: bool = False
+    ) -> ty.List[PipPackage]:
         """Merge a list of Pip install specs so each package only appears once
 
         Parameters
@@ -273,7 +277,7 @@ class PipPackage(BasePackage):
                 prev_spec.extras.extend(pip_spec.extras)
         return list(dct.values())
 
-    def local_package_location(self, pypi_fallback: bool = False):
+    def local_package_location(self, pypi_fallback: bool = False) -> PipPackage:
         """Detect the installed locations of the packages, including development
         versions.
 
@@ -385,7 +389,9 @@ class NeurodockerTemplate:
     version: str
 
 
-def python_package_converter(packages):
+def python_package_converter(
+    packages: ty.List[ty.Union[str, dict]]
+) -> ty.List[PipPackage]:
     """
     Split out and merge any extras specifications (e.g. "pipeline2app[test]")
     between dependencies of the same package
