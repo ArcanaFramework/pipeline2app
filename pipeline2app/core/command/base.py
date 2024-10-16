@@ -176,6 +176,7 @@ class ContainerCommand:
         raise_errors: bool = False,
         keep_running_on_errors: bool = False,
         pipeline_name: ty.Optional[str] = None,
+        **store_kwargs: ty.Any,
     ) -> None:
         """Runs the command within the entrypoint of the container image.
 
@@ -214,6 +215,8 @@ class ContainerCommand:
             raise errors instead of capturing and logging (for debugging)
         pipeline_name : str
             the name to give to the pipeline, defaults to the name of the command image
+        **store_kwargs: Any
+            keyword args passed through to Store.load
         """
 
         if isinstance(export_work, bytes):
@@ -237,7 +240,7 @@ class ContainerCommand:
         pipeline_cache_dir = work_dir / "pydra"
 
         dataset = self.load_frameset(
-            address, store_cache_dir, dataset_hierarchy, dataset_name
+            address, store_cache_dir, dataset_hierarchy, dataset_name, **store_kwargs
         )
 
         # Install required software licenses from store into container
@@ -496,6 +499,7 @@ class ContainerCommand:
         cache_dir: Path,
         dataset_hierarchy: ty.Optional[str],
         dataset_name: ty.Optional[str],
+        **kwargs: ty.Any,
     ) -> FrameSet:
         """Loads a dataset from within an image, to be used in image entrypoints
 
@@ -509,6 +513,8 @@ class ContainerCommand:
             the hierarchy of the dataset
         dataset_name : str
             overwrite dataset name loaded from ID str
+        **kwargs: Any
+            passed through to Store.load
 
         Returns
         -------
@@ -524,7 +530,7 @@ class ContainerCommand:
             if dataset_name is not None:
                 name = dataset_name
 
-            store = Store.load(store_name, cache_dir=cache_dir)
+            store = Store.load(store_name, cache_dir=cache_dir, **kwargs)
 
             if dataset_hierarchy is None:
                 hierarchy = self.axes.default().span()
