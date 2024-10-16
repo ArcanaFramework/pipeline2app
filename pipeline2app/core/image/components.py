@@ -17,8 +17,8 @@ logger = logging.getLogger("pipeline2app")
 @attrs.define(kw_only=True)
 class BaseImage:
 
-    DEFAULT_IMAGE = "ubuntu"
-    DEFAULT_UBUNTU_TAG = "jammy"  # FIXME: Should revert to latest LTS "jammy"
+    DEFAULT_IMAGE = "debian"
+    DEFAULT_IMAGE_TAG = "slim-bookworm"
     DEFAULT_CONDA_ENV = "pipeline2app"
     DEFAULT_USER = "root"
 
@@ -48,7 +48,7 @@ class BaseImage:
     @tag.default
     def tag_default(self):
         if self.name == "ubuntu":
-            tag = self.DEFAULT_UBUNTU_TAG
+            tag = self.DEFAULT_IMAGE_TAG
         else:
             tag = None
         return tag
