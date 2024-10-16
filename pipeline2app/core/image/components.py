@@ -47,7 +47,7 @@ class BaseImage:
 
     @tag.default
     def tag_default(self):
-        if self.name == "ubuntu":
+        if self.name == self.DEFAULT_IMAGE:
             tag = self.DEFAULT_IMAGE_TAG
         else:
             tag = None
