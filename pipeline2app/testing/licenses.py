@@ -1,9 +1,11 @@
+import typing as ty
+from pathlib import Path
 from pipeline2app.core.image import App
 from frametree.core.frameset import FrameSet
 from frametree.common import FileSystem, Samples
 
 
-def get_pipeline_image(license_path, app_cls=App) -> App:
+def get_pipeline_image(license_path: str, app_cls: ty.Type[App] = App) -> App:
     return app_cls(
         title="A test of the license installation",
         name="to_be_overridden",
@@ -15,7 +17,7 @@ def get_pipeline_image(license_path, app_cls=App) -> App:
         },
         readme="This is a test README",
         packages={
-            "pip": ["fileformats"],
+            "pip": ["fileformats", "frametree"],
         },
         licenses={
             LICENSE_NAME: {
@@ -56,7 +58,7 @@ def get_pipeline_image(license_path, app_cls=App) -> App:
     )
 
 
-def make_dataset(dataset_dir) -> FrameSet:
+def make_dataset(dataset_dir: Path) -> FrameSet:
 
     contents_dir = dataset_dir / "sample1"
     contents_dir.mkdir(parents=True)
