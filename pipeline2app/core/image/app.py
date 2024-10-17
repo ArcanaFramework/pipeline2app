@@ -229,11 +229,11 @@ class App(P2AImage):
     @classmethod
     def load(
         cls,
-        yml: ty.Union[Path, dict],
+        yml: ty.Union[Path, ty.Dict[str, ty.Any]],
         root_dir: ty.Optional[Path] = None,
-        license_paths: ty.Dict[str, Path] = None,
-        licenses_to_download: set[str] = None,
-        default_axes: ty.Type[Axes] = None,
+        license_paths: ty.Optional[ty.Dict[str, Path]] = None,
+        licenses_to_download: ty.Optional[ty.Set[str]] = None,
+        default_axes: ty.Optional[ty.Type[Axes]] = None,
         source_packages: ty.Sequence[Path] = (),
         **kwargs: ty.Any,
     ) -> "Self":
@@ -302,7 +302,11 @@ class App(P2AImage):
         if isinstance(commands, dict):
             commands = commands.values()
         for cmd in commands:
-            if re.match(r"\w+", cmd["row_frequency"]) and default_axes:
+            if (
+                "row_frequency" in cmd
+                and re.match(r"\w+", cmd["row_frequency"])
+                and default_axes
+            ):
                 cmd["row_frequency"] = default_axes[cmd["row_frequency"]]
 
         image = cls(**yml_dict)
