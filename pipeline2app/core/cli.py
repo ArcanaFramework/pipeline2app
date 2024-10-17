@@ -34,8 +34,9 @@ logger = logging.getLogger("pipeline2app")
 # Define the base CLI entrypoint
 @click.group()
 @click.version_option(version=__version__)
-def cli():
+def cli() -> None:
     """Base command line group, installed as "pipeline2app"."""
+    return None
 
 
 @cli.command(
@@ -236,25 +237,25 @@ containing multiple specifications
     ),
 )
 def make(
-    target,
+    target: str,
     spec_path: Path,
-    registry,
-    release,
-    tag_latest,
-    save_manifest,
-    logfile,
-    loglevel,
+    registry: str,
+    release: ty.Optional[ty.Tuple[str, str]],
+    tag_latest: bool,
+    save_manifest: ty.Optional[Path],
+    logfile: Path,
+    loglevel: str,
     build_dir: Path,
-    use_local_packages,
-    install_extras,
-    raise_errors,
-    generate_only,
-    for_localhost,
-    license,
-    license_to_download,
-    check_registry,
-    push,
-    clean_up,
+    use_local_packages: bool,
+    install_extras: str,
+    raise_errors: bool,
+    generate_only: bool,
+    for_localhost: bool,
+    license: ty.List[ty.Tuple[str, Path]],
+    license_to_download: ty.List[str],
+    check_registry: bool,
+    push: bool,
+    clean_up: bool,
     resource: ty.List[ty.Tuple[str, str]],
     resources_dir: ty.Optional[Path],
     spec_root: Path,
@@ -445,7 +446,7 @@ def make(
                 )
         if clean_up:
 
-            def remove_image_and_containers(image_ref):
+            def remove_image_and_containers(image_ref: str) -> None:
                 logger.info(
                     "Removing '%s' image and associated containers to free up disk space "
                     "as '--clean-up' is set",
@@ -563,7 +564,7 @@ DOCKER_ORG is the Docker organisation the images should belong to""",
     default=None,
     help="The Docker registry to deploy the pipeline to",
 )
-def list_images(spec_root, registry):
+def list_images(spec_root: Path, registry: str) -> None:
     if isinstance(spec_root, bytes):  # FIXME: This shouldn't be necessary
         spec_root = Path(spec_root.decode("utf-8"))
 
@@ -600,7 +601,15 @@ The generated documentation will be saved to OUTPUT.
     default=None,
     help=("The root path to consider the specs to be relative to, defaults to CWD"),
 )
-def make_docs(spec_path, output, registry, flatten, loglevel, default_axes, spec_root):
+def make_docs(
+    spec_path: Path,
+    output: Path,
+    registry: str,
+    flatten: bool,
+    loglevel: str,
+    default_axes: ty.Optional[str],
+    spec_root: Path,
+) -> None:
     # # FIXME: Workaround for click 7.x, which improperly handles path_type
     # if type(spec_path) is bytes:
     #     spec_path = Path(spec_path.decode("utf-8"))
@@ -632,7 +641,7 @@ def make_docs(spec_path, output, registry, flatten, loglevel, default_axes, spec
 specified workflows and return them and their versions""",
 )
 @click.argument("task_locations", nargs=-1)
-def required_packages(task_locations):
+def required_packages(task_locations: ty.List[str]) -> None:
     required_modules = set()
     for task_location in task_locations:
         workflow = ClassResolver(
@@ -648,7 +657,7 @@ def required_packages(task_locations):
     name="inspect-docker-exec", help="""Extract the executable from a Docker image"""
 )
 @click.argument("image_tag", type=str)
-def inspect_docker_exec(image_tag):
+def inspect_docker_exec(image_tag: str) -> None:
     """Pulls a given Docker image tag and inspects the image to get its
     entrypoint/cmd
 
@@ -674,7 +683,7 @@ and the commands present in them"""
 )
 @click.argument("manifest_json", type=click.File())
 @click.argument("images", nargs=-1)
-def changelog(manifest_json):
+def changelog(manifest_json: ty.TextIO, images: ty.List[str]) -> None:
     manifest = json.load(manifest_json)
 
     for entry in manifest["images"]:
@@ -697,16 +706,16 @@ in the format <store-nickname>//<dataset-id>[@<dataset-name>]
 """,
 )
 @click.argument("address")
-@entrypoint_opts.data_columns
-@entrypoint_opts.parameterisation
-@entrypoint_opts.execution
-@entrypoint_opts.dataset_config
-@entrypoint_opts.debugging
+@entrypoint_opts.data_columns  # type: ignore[misc]
+@entrypoint_opts.parameterisation  # type: ignore[misc]
+@entrypoint_opts.execution  # type: ignore[misc]
+@entrypoint_opts.dataset_config  # type: ignore[misc]
+@entrypoint_opts.debugging  # type: ignore[misc]
 def pipeline_entrypoint(
-    address,
-    spec_path,
-    **kwargs,
-):
+    address: str,
+    spec_path: Path,
+    **kwargs: ty.Any,
+) -> None:
     image_spec = App.load(spec_path)
 
     image_spec.command.execute(
@@ -716,8 +725,9 @@ def pipeline_entrypoint(
 
 
 @cli.group()
-def ext():
+def ext() -> None:
     """Command-line group for extension hooks"""
+    return None
 
 
 @cli.command(
@@ -901,7 +911,7 @@ def bootstrap(
     command_configuration: ty.List[ty.Tuple[str, str]],
     frequency: str,
     licenses: ty.List[ty.Tuple[str, str, str, str]],
-):
+) -> None:
 
     # Make the output directory if it doesn't exist
     Path(output_file).parent.mkdir(parents=True, exist_ok=True)
