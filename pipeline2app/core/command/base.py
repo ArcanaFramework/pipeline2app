@@ -266,14 +266,21 @@ class ContainerCommand:
                 column = dataset[path]
                 logger.info(f"Found existing source column {column}")
             else:
-                logger.info(f"Adding new source column '{input_name}'")
-                column = dataset.add_source(
-                    name=input_name,
-                    datatype=inpt.column_defaults.datatype,
-                    path=path,
-                    is_regex=True,
-                    **source_kwargs,
-                )
+                default_column_name = f"{path2label(self.name)}_{input_name}"
+                try:
+                    column = dataset[default_column_name]
+                except KeyError:
+                    logger.info(f"Adding new source column '{default_column_name}'")
+                    column = dataset.add_source(
+                        name=default_column_name,
+                        datatype=inpt.column_defaults.datatype,
+                        path=path,
+                        is_regex=True,
+                        **source_kwargs,
+                    )
+                else:
+                    logger.info("Found existing source column %s", default_column_name)
+
             if input_config := inpt.config_dict:
                 input_configs.append(input_config)
             pipeline_inputs.append((column.name, inpt.field, inpt.datatype))
