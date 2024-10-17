@@ -285,7 +285,7 @@ def test_multi_command(
 
     fnames = ["file1.txt", "file2.txt"]
 
-    for command in ["two_duplicates", "two_duplicates"]:
+    for command in ["two_duplicates", "three_duplicates"]:
 
         # Name the output column based on the command and set the command
         args = base_args + [command, "--command", command]
