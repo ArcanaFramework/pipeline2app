@@ -714,11 +714,12 @@ in the format <store-nickname>//<dataset-id>[@<dataset-name>]
 def pipeline_entrypoint(
     address: str,
     spec_path: Path,
+    command: ty.Optional[str],
     **kwargs: ty.Any,
 ) -> None:
     image_spec = App.load(spec_path)
 
-    image_spec.command.execute(
+    image_spec.command(command).execute(
         address,
         **kwargs,
     )
@@ -892,6 +893,12 @@ def ext() -> None:
         "description of the license and what it is required for"
     ),
 )
+@click.option(
+    "--name",
+    type=str,
+    default="your-command",
+    help="The name of the command",
+)
 def bootstrap(
     output_file: str,
     title: str,
@@ -911,12 +918,15 @@ def bootstrap(
     command_configuration: ty.List[ty.Tuple[str, str]],
     frequency: str,
     licenses: ty.List[ty.Tuple[str, str, str, str]],
+    name: str,
 ) -> None:
 
     # Make the output directory if it doesn't exist
     Path(output_file).parent.mkdir(parents=True, exist_ok=True)
 
-    def unwrap_fields(fields: ty.List[ty.Tuple[str, str, str]]):
+    def unwrap_fields(
+        fields: ty.List[ty.Tuple[str, str, str]]
+    ) -> ty.Dict[str, ty.Dict[str, ty.Any]]:
         fields_dict = {}
         for field_name, attrs_str in fields:
             attrs = [re.split(r"(?<!\\)=", a) for a in re.split(r"(?<!\\),", attrs_str)]
@@ -943,7 +953,7 @@ def bootstrap(
 
     ver_split_re = re.compile(r">=|<=|==|>|<")
 
-    def split_versions(packages):
+    def split_versions(packages: ty.List[str]) -> ty.Dict[str, ty.Optional[str]]:
         return dict(
             ver_split_re.split(p, maxsplit=1) if "=" in p else [p, None]
             for p in packages
@@ -968,13 +978,15 @@ def bootstrap(
             "system": split_versions(packages_system),
             "neurodocker": split_versions(packages_neurodocker),
         },
-        "command": {
-            "task": command_task,
-            "row_frequency": frequency,
-            "inputs": unwrap_fields(command_inputs),
-            "outputs": unwrap_fields(command_outputs),
-            "parameters": unwrap_fields(command_parameters),
-            "configuration": dict(command_configuration),
+        "commands": {
+            name: {
+                "task": command_task,
+                "row_frequency": frequency,
+                "inputs": unwrap_fields(command_inputs),
+                "outputs": unwrap_fields(command_outputs),
+                "parameters": unwrap_fields(command_parameters),
+                "configuration": dict(command_configuration),
+            }
         },
         "licenses": {
             lc[0]: {"destination": lc[1], "info_url": lc[2], "description": lc[3]}

@@ -83,9 +83,29 @@ class App(P2AImage):
     loaded_from: Path = attrs.field(default=None, metadata={"asdict": False})
     pipeline2app_version: str = __version__
 
+    @commands.validator
+    def _validate_commands(
+        self,
+        attribute: attrs.Attribute[ty.List[ContainerCommand]],
+        commands: ty.List[ContainerCommand],
+    ) -> None:
+        if not commands:
+            raise ValueError("At least one command must be defined within that app")
+
     def __attrs_post_init__(self) -> None:
         # Set back-references to this image in the command spec
-        self.command.image = self
+        for command in self.commands:
+            command.image = self
+
+    def command(self, name: ty.Optional[str] = None) -> ContainerCommand:
+        if name is None:
+            command = self.commands[0]  # Default to the first command
+        else:
+            try:
+                command = next(c for c in self.commands if c.name == name)
+            except StopIteration:
+                raise KeyError(f"No command with name '{name}' found")
+        return command
 
     def add_entrypoint(self, dockerfile: DockerRenderer, build_dir: Path) -> None:
         dockerfile.entrypoint(
@@ -278,10 +298,12 @@ class App(P2AImage):
         yml_dict.update(kwargs)
 
         # If data-space is not defined, default to `default_axes`
-        if re.match(r"\w+", yml_dict["command"]["row_frequency"]) and default_axes:
-            yml_dict["command"]["row_frequency"] = default_axes[
-                yml_dict["command"]["row_frequency"]
-            ]
+        commands = yml_dict["commands"]
+        if isinstance(commands, dict):
+            commands = commands.values()
+        for cmd in commands:
+            if re.match(r"\w+", cmd["row_frequency"]) and default_axes:
+                cmd["row_frequency"] = default_axes[cmd["row_frequency"]]
 
         image = cls(**yml_dict)
 
@@ -419,67 +441,69 @@ class App(P2AImage):
 
                 f.write("\n")
 
-            f.write("## Command\n")
+            f.write("## Commands\n")
 
-            tbl_cmd = MarkdownTable(f, "Key", "Value")
+            for command in self.commands:
 
-            # if self.command.configuration is not None:
-            #     config = self.command.configuration
-            #     # configuration keys are variable depending on the workflow class
-            tbl_cmd.write_row("Task", ClassResolver.tostr(self.command.task))
-            freq_name = (
-                self.command.row_frequency.name
-                if not isinstance(self.command.row_frequency, str)
-                else re.match(r".*\[(\w+)\]", self.command.row_frequency).group(1)
-            )
-            tbl_cmd.write_row("Operates on", freq_name)
+                tbl_cmd = MarkdownTable(f, "Key", "Value")
 
-            f.write("#### Inputs\n")
-            tbl_inputs = MarkdownTable(
-                f,
-                "Name",
-                "Required data-type",
-                "Default column data-type",
-                "Description",
-            )
-            if self.command.inputs is not None:
-                for inpt in self.command.inputs:
-                    tbl_inputs.write_row(
-                        escaped_md(inpt.name),
-                        self._data_format_html(inpt.datatype),
-                        self._data_format_html(inpt.column_defaults.datatype),
-                        inpt.help,
-                    )
-                f.write("\n")
+                # if command.configuration is not None:
+                #     config = command.configuration
+                #     # configuration keys are variable depending on the workflow class
+                tbl_cmd.write_row("Task", ClassResolver.tostr(command.task))
+                freq_name = (
+                    command.row_frequency.name
+                    if not isinstance(command.row_frequency, str)
+                    else re.match(r".*\[(\w+)\]", command.row_frequency).group(1)
+                )
+                tbl_cmd.write_row("Operates on", freq_name)
 
-            f.write("#### Outputs\n")
-            tbl_outputs = MarkdownTable(
-                f,
-                "Name",
-                "Required data-type",
-                "Default column data-type",
-                "Description",
-            )
-            if self.command.outputs is not None:
-                for outpt in self.command.outputs:
-                    tbl_outputs.write_row(
-                        escaped_md(outpt.name),
-                        self._data_format_html(outpt.datatype),
-                        self._data_format_html(outpt.column_defaults.datatype),
-                        outpt.help,
-                    )
-                f.write("\n")
+                f.write("#### Inputs\n")
+                tbl_inputs = MarkdownTable(
+                    f,
+                    "Name",
+                    "Required data-type",
+                    "Default column data-type",
+                    "Description",
+                )
+                if command.inputs is not None:
+                    for inpt in command.inputs:
+                        tbl_inputs.write_row(
+                            escaped_md(inpt.name),
+                            self._data_format_html(inpt.datatype),
+                            self._data_format_html(inpt.column_defaults.datatype),
+                            inpt.help,
+                        )
+                    f.write("\n")
 
-            if self.command.parameters is not None:
-                f.write("#### Parameters\n")
-                tbl_params = MarkdownTable(f, "Name", "Data type", "Description")
-                for param in self.command.parameters:
-                    tbl_params.write_row(
-                        escaped_md(param.name),
-                        escaped_md(ClassResolver.tostr(param.datatype)),
-                        param.help,
-                    )
-                f.write("\n")
+                f.write("#### Outputs\n")
+                tbl_outputs = MarkdownTable(
+                    f,
+                    "Name",
+                    "Required data-type",
+                    "Default column data-type",
+                    "Description",
+                )
+                if command.outputs is not None:
+                    for outpt in command.outputs:
+                        tbl_outputs.write_row(
+                            escaped_md(outpt.name),
+                            self._data_format_html(outpt.datatype),
+                            self._data_format_html(outpt.column_defaults.datatype),
+                            outpt.help,
+                        )
+                    f.write("\n")
+
+                if command.parameters is not None:
+                    f.write("#### Parameters\n")
+                    tbl_params = MarkdownTable(f, "Name", "Data type", "Description")
+                    for param in command.parameters:
+                        tbl_params.write_row(
+                            escaped_md(param.name),
+                            escaped_md(ClassResolver.tostr(param.datatype)),
+                            param.help,
+                        )
+                    f.write("\n")
 
     def compare_specs(self, other: "App", check_version: bool = True) -> DeepDiff:
         """Compares two build specs against each other and returns the difference

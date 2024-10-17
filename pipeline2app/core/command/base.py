@@ -85,7 +85,7 @@ class ContainerCommand:
     configuration: ty.Dict[str, ty.Any] = attrs.field(
         factory=dict, converter=default_if_none(dict)  # type: ignore[misc]
     )
-    image: ty.Optional[App] = attrs.field(default=None)
+    image: App = attrs.field(default=None)
 
     def __attrs_post_init__(self) -> None:
         if isinstance(self.row_frequency, Axes):

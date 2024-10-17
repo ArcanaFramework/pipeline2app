@@ -57,6 +57,7 @@ def test_command_execute(concatenate_task, saved_dataset, work_dir):
     duplicates = 1
 
     command_spec = ContainerCommand(
+        name="concatenate",
         task="pipeline2app.testing.tasks:" + concatenate_task.__name__,
         row_frequency=bp.axes.default(),
         inputs=[
@@ -131,6 +132,7 @@ def test_command_execute_fail(concatenate_task, saved_dataset, work_dir):
     duplicates = 1
 
     command_spec = ContainerCommand(
+        name="concatenate",
         task="pipeline2app.testing.tasks:" + concatenate_task.__name__,
         row_frequency=bp.axes.default(),
         inputs=[
@@ -216,6 +218,7 @@ def test_command_execute_on_row(cli_runner, work_dir):
     assert get_dataset_filenumbers() == filenumbers
 
     command_spec = ContainerCommand(
+        name="plus-10",
         task="pipeline2app.testing.tasks:plus_10_to_filenumbers",
         row_frequency=bp.axes.default(),
         inputs=[
@@ -255,6 +258,7 @@ def test_command_execute_with_converter_args(
     # Start generating the arguments for the CLI
     # Add source to loaded dataset
     command_spec = ContainerCommand(
+        name="identity",
         task="pipeline2app.testing.tasks:identity_file",
         row_frequency=bp.axes.default(),
         inputs=[
@@ -327,6 +331,7 @@ def test_shell_command_execute(saved_dataset, work_dir):
     duplicates = 1
 
     command_spec = ContainerCommand(
+        name="shell-test",
         task="shell",
         row_frequency=bp.axes.default(),
         inputs=[

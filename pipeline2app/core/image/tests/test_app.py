@@ -22,41 +22,43 @@ def test_native_python_install(tmp_path):
     test_spec = {
         "name": "native_python_test",
         "title": "a test image spec",
-        "command": {
-            "task": "common:shell",
-            "inputs": {
-                "dummy": {
-                    "datatype": "text/text-file",
-                    "help": "a dummy input that isn't actually used",
-                    "configuration": {
-                        "position": 0,
+        "commands": {
+            "python-test-command": {
+                "task": "common:shell",
+                "inputs": {
+                    "dummy": {
+                        "datatype": "text/text-file",
+                        "help": "a dummy input that isn't actually used",
+                        "configuration": {
+                            "position": 0,
+                        },
                     },
                 },
-            },
-            "outputs": {
-                OUTPUT_COL_NAME: {
-                    "datatype": "field/text",
-                    "help": "the print to stdout",
-                    "configuration": {
-                        "callable": "common:value_from_stdout",
-                    },
-                }
-            },
-            "parameters": {
-                "duplicates": {
-                    "field": "duplicates",
-                    "default": 2,
-                    "datatype": "field/integer",
-                    "required": True,
-                    "help": "a parameter",
-                }
-            },
-            "row_frequency": "common:Samples[sample]",
-            "configuration": {
-                "executable": [
-                    "pipeline2app",
-                    "--version",
-                ]
+                "outputs": {
+                    OUTPUT_COL_NAME: {
+                        "datatype": "field/text",
+                        "help": "the print to stdout",
+                        "configuration": {
+                            "callable": "common:value_from_stdout",
+                        },
+                    }
+                },
+                "parameters": {
+                    "duplicates": {
+                        "field": "duplicates",
+                        "default": 2,
+                        "datatype": "field/integer",
+                        "required": True,
+                        "help": "a parameter",
+                    }
+                },
+                "row_frequency": "common:Samples[sample]",
+                "configuration": {
+                    "executable": [
+                        "pipeline2app",
+                        "--version",
+                    ]
+                },
             },
         },
         "version": {"package": "1.0", "build": "1"},
