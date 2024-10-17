@@ -16,17 +16,13 @@ from frametree.core.serialize import (
     ObjectListConverter,
     ClassResolver,
 )
+from typing_extensions import Self
+from fileformats.core import DataType
 from frametree.core.axes import Axes
 from pipeline2app.core.utils import is_relative_to
 from ..command.base import ContainerCommand
 from .base import P2AImage
 from .components import ContainerAuthor, License, Docs, PipPackage
-
-
-try:
-    from typing import Self
-except ImportError:
-    from typing_extensions import Self
 
 
 logger = logging.getLogger("pipeline2app")
@@ -81,20 +77,51 @@ class App(P2AImage):
         metadata={"serializer": ObjectListConverter.asdict},
     )
     docs: Docs = attrs.field(converter=ObjectConverter(Docs))
-    command: ContainerCommand = attrs.field(converter=ObjectConverter(ContainerCommand))
+    commands: ty.List[ContainerCommand] = attrs.field(
+        converter=ObjectListConverter(ContainerCommand)
+    )
     loaded_from: Path = attrs.field(default=None, metadata={"asdict": False})
     pipeline2app_version: str = __version__
 
-    def __attrs_post_init__(self):
-        # Set back-references to this image in the command spec
-        self.command.image = self
+    @commands.validator
+    def _validate_commands(
+        self,
+        attribute: attrs.Attribute[ty.List[ContainerCommand]],
+        commands: ty.List[ContainerCommand],
+    ) -> None:
+        if not commands:
+            raise ValueError("At least one command must be defined within that app")
 
-    def add_entrypoint(self, dockerfile: DockerRenderer, build_dir: Path):
+    def __attrs_post_init__(self) -> None:
+        # Set back-references to this image in the command spec
+        for command in self.commands:
+            command.image = self
+
+    def command(self, name: ty.Optional[str] = None) -> ContainerCommand:
+        if name is None:
+            command = self.commands[0]  # Default to the first command
+        else:
+            try:
+                command = next(c for c in self.commands if c.name == name)
+            except StopIteration:
+                raise KeyError(f"No command with name '{name}' found")
+        return command
+
+    def add_entrypoint(self, dockerfile: DockerRenderer, build_dir: Path) -> None:
         dockerfile.entrypoint(
             self.activate_conda() + ["pipeline2app", "pipeline-entrypoint"]
         )
 
-    def construct_dockerfile(self, build_dir: Path, **kwargs) -> DockerRenderer:
+    def construct_dockerfile(
+        self,
+        build_dir: Path,
+        use_local_packages: bool = False,
+        pypi_fallback: bool = False,
+        pipeline2app_install_extras: ty.Sequence[str] = (),
+        resources: ty.Optional[ty.Dict[str, Path]] = None,
+        resources_dir: ty.Optional[Path] = None,
+        **kwargs: ty.Any,
+    ) -> DockerRenderer:
         """Constructs a dockerfile that wraps a with dependencies
 
         Parameters
@@ -111,7 +138,15 @@ class App(P2AImage):
             Neurodocker Docker renderer to construct dockerfile from
         """
 
-        dockerfile = super().construct_dockerfile(build_dir, **kwargs)
+        dockerfile = super().construct_dockerfile(
+            build_dir=build_dir,
+            use_local_packages=use_local_packages,
+            pypi_fallback=pypi_fallback,
+            pipeline2app_install_extras=pipeline2app_install_extras,
+            resources=resources,
+            resources_dir=resources_dir,
+            **kwargs,
+        )
 
         self.install_licenses(
             dockerfile,
@@ -128,7 +163,7 @@ class App(P2AImage):
         self,
         dockerfile: DockerRenderer,
         build_dir: Path,
-    ):
+    ) -> None:
         """Generate Neurodocker instructions to install licenses within the container
         image
 
@@ -160,7 +195,7 @@ class App(P2AImage):
                         lic.column_name(lic.name),
                     )
 
-    def insert_spec(self, dockerfile: DockerRenderer, build_dir):
+    def insert_spec(self, dockerfile: DockerRenderer, build_dir: Path) -> None:
         """Generate Neurodocker instructions to save the specification inside the built
         image to be used when running the command and comparing against future builds
 
@@ -178,7 +213,7 @@ class App(P2AImage):
             source=["./pipeline2app-spec.yaml"], destination=self.IN_DOCKER_SPEC_PATH
         )
 
-    def save(self, yml_path: Path):
+    def save(self, yml_path: Path) -> None:
         """Saves the specification to a YAML file that can be loaded again
 
         Parameters
@@ -194,13 +229,13 @@ class App(P2AImage):
     @classmethod
     def load(
         cls,
-        yml: ty.Union[Path, dict],
+        yml: ty.Union[Path, ty.Dict[str, ty.Any]],
         root_dir: ty.Optional[Path] = None,
-        license_paths: ty.Dict[str, Path] = None,
-        licenses_to_download: set[str] = None,
-        default_axes: ty.Type[Axes] = None,
+        license_paths: ty.Optional[ty.Dict[str, Path]] = None,
+        licenses_to_download: ty.Optional[ty.Set[str]] = None,
+        default_axes: ty.Optional[ty.Type[Axes]] = None,
         source_packages: ty.Sequence[Path] = (),
-        **kwargs,
+        **kwargs: ty.Any,
     ) -> "Self":
         """Loads a deploy-build specification from a YAML file
 
@@ -263,10 +298,16 @@ class App(P2AImage):
         yml_dict.update(kwargs)
 
         # If data-space is not defined, default to `default_axes`
-        if re.match(r"\w+", yml_dict["command"]["row_frequency"]) and default_axes:
-            yml_dict["command"]["row_frequency"] = default_axes[
-                yml_dict["command"]["row_frequency"]
-            ]
+        commands = yml_dict["commands"]
+        if isinstance(commands, dict):
+            commands = commands.values()
+        for cmd in commands:
+            if (
+                "row_frequency" in cmd
+                and re.match(r"\w+", cmd["row_frequency"])
+                and default_axes
+            ):
+                cmd["row_frequency"] = default_axes[cmd["row_frequency"]]
 
         image = cls(**yml_dict)
 
@@ -314,8 +355,8 @@ class App(P2AImage):
         return image
 
     @classmethod
-    def _load_yaml(cls, yaml_file: ty.Union[Path, str]):
-        def yaml_join(loader, node):
+    def _load_yaml(cls, yaml_file: ty.Union[Path, str]) -> ty.Dict[str, ty.Any]:
+        def yaml_join(loader: yaml.Loader, node: yaml.SequenceNode) -> str:
             seq = loader.construct_sequence(node)
             return "".join([str(i) for i in seq])
 
@@ -323,10 +364,12 @@ class App(P2AImage):
         yaml.SafeLoader.add_constructor(tag="!join", constructor=yaml_join)
         with open(yaml_file, "r") as f:
             dct = yaml.load(f, Loader=yaml.SafeLoader)
-        return dct
+        return dct  # type: ignore[no-any-return]
 
     @classmethod
-    def load_tree(cls, spec_path: Path, root_dir: Path, **kwargs) -> ty.List[Self]:
+    def load_tree(
+        cls, spec_path: Path, root_dir: Path, **kwargs: ty.Any
+    ) -> ty.List[Self]:
         """Walk the given directory structure and load all specs found within it
 
         Parameters
@@ -346,7 +389,7 @@ class App(P2AImage):
 
         return specs
 
-    def autodoc(self, doc_dir, flatten: bool):
+    def autodoc(self, doc_dir: Path, flatten: bool) -> None:
         header = {
             "title": self.name,
             "weight": 10,
@@ -402,69 +445,71 @@ class App(P2AImage):
 
                 f.write("\n")
 
-            f.write("## Command\n")
+            f.write("## Commands\n")
 
-            tbl_cmd = MarkdownTable(f, "Key", "Value")
+            for command in self.commands:
 
-            # if self.command.configuration is not None:
-            #     config = self.command.configuration
-            #     # configuration keys are variable depending on the workflow class
-            tbl_cmd.write_row("Task", ClassResolver.tostr(self.command.task))
-            freq_name = (
-                self.command.row_frequency.name
-                if not isinstance(self.command.row_frequency, str)
-                else re.match(r".*\[(\w+)\]", self.command.row_frequency).group(1)
-            )
-            tbl_cmd.write_row("Operates on", freq_name)
+                tbl_cmd = MarkdownTable(f, "Key", "Value")
 
-            f.write("#### Inputs\n")
-            tbl_inputs = MarkdownTable(
-                f,
-                "Name",
-                "Required data-type",
-                "Default column data-type",
-                "Description",
-            )
-            if self.command.inputs is not None:
-                for inpt in self.command.inputs:
-                    tbl_inputs.write_row(
-                        escaped_md(inpt.name),
-                        self._data_format_html(inpt.datatype),
-                        self._data_format_html(inpt.column_defaults.datatype),
-                        inpt.help,
-                    )
-                f.write("\n")
+                # if command.configuration is not None:
+                #     config = command.configuration
+                #     # configuration keys are variable depending on the workflow class
+                tbl_cmd.write_row("Task", ClassResolver.tostr(command.task))
+                freq_name = (
+                    command.row_frequency.name
+                    if not isinstance(command.row_frequency, str)
+                    else re.match(r".*\[(\w+)\]", command.row_frequency).group(1)
+                )
+                tbl_cmd.write_row("Operates on", freq_name)
 
-            f.write("#### Outputs\n")
-            tbl_outputs = MarkdownTable(
-                f,
-                "Name",
-                "Required data-type",
-                "Default column data-type",
-                "Description",
-            )
-            if self.command.outputs is not None:
-                for outpt in self.command.outputs:
-                    tbl_outputs.write_row(
-                        escaped_md(outpt.name),
-                        self._data_format_html(outpt.datatype),
-                        self._data_format_html(outpt.column_defaults.datatype),
-                        outpt.help,
-                    )
-                f.write("\n")
+                f.write("#### Inputs\n")
+                tbl_inputs = MarkdownTable(
+                    f,
+                    "Name",
+                    "Required data-type",
+                    "Default column data-type",
+                    "Description",
+                )
+                if command.inputs is not None:
+                    for inpt in command.inputs:
+                        tbl_inputs.write_row(
+                            escaped_md(inpt.name),
+                            self._data_format_html(inpt.datatype),
+                            self._data_format_html(inpt.column_defaults.datatype),
+                            inpt.help,
+                        )
+                    f.write("\n")
 
-            if self.command.parameters is not None:
-                f.write("#### Parameters\n")
-                tbl_params = MarkdownTable(f, "Name", "Data type", "Description")
-                for param in self.command.parameters:
-                    tbl_params.write_row(
-                        escaped_md(param.name),
-                        escaped_md(ClassResolver.tostr(param.datatype)),
-                        param.help,
-                    )
-                f.write("\n")
+                f.write("#### Outputs\n")
+                tbl_outputs = MarkdownTable(
+                    f,
+                    "Name",
+                    "Required data-type",
+                    "Default column data-type",
+                    "Description",
+                )
+                if command.outputs is not None:
+                    for outpt in command.outputs:
+                        tbl_outputs.write_row(
+                            escaped_md(outpt.name),
+                            self._data_format_html(outpt.datatype),
+                            self._data_format_html(outpt.column_defaults.datatype),
+                            outpt.help,
+                        )
+                    f.write("\n")
 
-    def compare_specs(self, other, check_version=True):
+                if command.parameters is not None:
+                    f.write("#### Parameters\n")
+                    tbl_params = MarkdownTable(f, "Name", "Data type", "Description")
+                    for param in command.parameters:
+                        tbl_params.write_row(
+                            escaped_md(param.name),
+                            escaped_md(ClassResolver.tostr(param.datatype)),
+                            param.help,
+                        )
+                    f.write("\n")
+
+    def compare_specs(self, other: "App", check_version: bool = True) -> DeepDiff:
         """Compares two build specs against each other and returns the difference
 
         Parameters
@@ -485,7 +530,7 @@ class App(P2AImage):
         sdict = self.asdict()
         odict = other.asdict()
 
-        def prep(s):
+        def prep(s: ty.Dict[str, ty.Any]) -> ty.Dict[str, ty.Any]:
             dct = {
                 k: v
                 for k, v in s.items()
@@ -508,7 +553,7 @@ class App(P2AImage):
     #     return klass.load(yml_dct)
 
     @classmethod
-    def _data_format_html(cls, datatype):
+    def _data_format_html(cls, datatype: ty.Union[str, DataType]) -> str:
         datatype_str = datatype.mime_like if not isinstance(datatype, str) else datatype
 
         return (
@@ -534,11 +579,11 @@ class MarkdownTable:
         self.f = f
         self._write_header()
 
-    def _write_header(self):
+    def _write_header(self) -> None:
         self.write_row(*self.headers)
         self.write_row(*("-" * len(x) for x in self.headers))
 
-    def write_row(self, *cols: str):
+    def write_row(self, *cols: str) -> None:
         cols = list(cols)
         if len(cols) > len(self.headers):
             raise ValueError(

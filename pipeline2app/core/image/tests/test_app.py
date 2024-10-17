@@ -1,8 +1,11 @@
 import os
 import docker
+from pathlib import Path
+from copy import deepcopy
 from frametree.common import FileSystem, Samples
 from pipeline2app.core.image import App, P2AImage
 from pipeline2app.core import PACKAGE_NAME
+from conftest import TestDatasetBlueprint
 
 
 def test_native_python_install(tmp_path):
@@ -22,41 +25,43 @@ def test_native_python_install(tmp_path):
     test_spec = {
         "name": "native_python_test",
         "title": "a test image spec",
-        "command": {
-            "task": "common:shell",
-            "inputs": {
-                "dummy": {
-                    "datatype": "text/text-file",
-                    "help": "a dummy input that isn't actually used",
-                    "configuration": {
-                        "position": 0,
+        "commands": {
+            "python-test-command": {
+                "task": "common:shell",
+                "inputs": {
+                    "dummy": {
+                        "datatype": "text/text-file",
+                        "help": "a dummy input that isn't actually used",
+                        "configuration": {
+                            "position": 0,
+                        },
                     },
                 },
-            },
-            "outputs": {
-                OUTPUT_COL_NAME: {
-                    "datatype": "field/text",
-                    "help": "the print to stdout",
-                    "configuration": {
-                        "callable": "common:value_from_stdout",
-                    },
-                }
-            },
-            "parameters": {
-                "duplicates": {
-                    "field": "duplicates",
-                    "default": 2,
-                    "datatype": "field/integer",
-                    "required": True,
-                    "help": "a parameter",
-                }
-            },
-            "row_frequency": "common:Samples[sample]",
-            "configuration": {
-                "executable": [
-                    "pipeline2app",
-                    "--version",
-                ]
+                "outputs": {
+                    OUTPUT_COL_NAME: {
+                        "datatype": "field/text",
+                        "help": "the print to stdout",
+                        "configuration": {
+                            "callable": "common:value_from_stdout",
+                        },
+                    }
+                },
+                "parameters": {
+                    "duplicates": {
+                        "field": "duplicates",
+                        "default": 2,
+                        "datatype": "field/integer",
+                        "required": True,
+                        "help": "a parameter",
+                    }
+                },
+                "row_frequency": "common:Samples[sample]",
+                "configuration": {
+                    "executable": [
+                        "pipeline2app",
+                        "--version",
+                    ]
+                },
             },
         },
         "version": {"package": "1.0", "build": "1"},
@@ -191,3 +196,121 @@ def test_add_resources(tmp_path):
             + e.stderr.decode("utf-8")
         )
     assert result == b"bar"
+
+
+def test_multi_command(
+    simple_dataset_blueprint: TestDatasetBlueprint, tmp_path: Path
+) -> None:
+
+    dataset = simple_dataset_blueprint.make_dataset(
+        FileSystem(), tmp_path / "dataset", name=""
+    )
+
+    two_dup_spec = dict(
+        name="concatenate",
+        task="pipeline2app.testing.tasks:concatenate",
+        row_frequency=simple_dataset_blueprint.axes.default().tostr(),
+        inputs=[
+            {
+                "name": "first_file",
+                "datatype": "text/text-file",
+                "field": "in_file1",
+                "help": "dummy",
+            },
+            {
+                "name": "second_file",
+                "datatype": "text/text-file",
+                "field": "in_file2",
+                "help": "dummy",
+            },
+        ],
+        outputs=[
+            {
+                "name": "concatenated",
+                "datatype": "text/text-file",
+                "field": "out_file",
+                "help": "dummy",
+            }
+        ],
+        parameters={
+            "duplicates": {
+                "datatype": "field/integer",
+                "default": 2,
+                "help": "dummy",
+            }
+        },
+    )
+
+    three_dup_spec = deepcopy(two_dup_spec)
+    three_dup_spec["parameters"]["duplicates"]["default"] = 3
+
+    test_spec = {
+        "name": "test_multi_commands",
+        "title": "a test image for multi-image commands",
+        "commands": {
+            "two_duplicates": two_dup_spec,
+            "three_duplicates": three_dup_spec,
+        },
+        "version": {"package": "1.0", "build": "1"},
+        "packages": {
+            "system": ["vim"],  # just to test it out
+            "pip": {
+                "fileformats": None,
+                "pipeline2app": None,
+                "frametree": None,
+            },
+        },
+        "authors": [{"name": "Some One", "email": "some.one@an.email.org"}],
+        "docs": {
+            "info_url": "http://concatenate.readthefakedocs.io",
+        },
+    }
+
+    app = App.load(test_spec)
+
+    app.make(build_dir=tmp_path / "build-dir", use_local_packages=True)
+
+    volume_mount = str(dataset.id) + ":/dataset:rw"
+    base_args = [
+        "/dataset",
+        "--input",
+        "first_file",
+        "file1",
+        "--input",
+        "second_file",
+        "file2",
+        "--output",
+        "concatenated",
+    ]
+
+    fnames = ["file1.txt", "file2.txt"]
+
+    for command in ["two_duplicates", "three_duplicates"]:
+
+        # Name the output column based on the command and set the command
+        args = base_args + [command, "--command", command]
+
+        dc = docker.from_env()
+        try:
+            dc.containers.run(
+                app.reference,
+                command=args,
+                stderr=True,
+                volumes=[volume_mount],
+                user=f"{os.getuid()}:{os.getgid()}",
+            )
+        except docker.errors.ContainerError as e:
+            raise RuntimeError(
+                f"'docker run -v {volume_mount} {app.reference} {' '.join(args)}' errored:\n"
+                + e.stderr.decode("utf-8")
+            )
+
+        # Add source column to saved dataset
+        reloaded = dataset.reload()
+        sink = reloaded[command]
+        duplicates = 2 if command == "two_duplicates" else 3
+        expected_contents = "\n".join(fnames * duplicates)
+        for item in sink:
+            with open(item) as f:
+                contents = f.read()
+            assert contents == expected_contents

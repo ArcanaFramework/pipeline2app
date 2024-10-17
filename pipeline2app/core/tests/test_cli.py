@@ -28,7 +28,7 @@ def test_deploy_make_cli(command_spec, cli_runner, work_dir):
 
     concatenate_spec = {
         "title": "a test image spec",
-        "command": command_spec,
+        "commands": {"test-command": command_spec},
         "version": {"package": "1.0", "build": "1"},
         "packages": {
             "system": ["vim"],  # just to test it out
@@ -116,7 +116,7 @@ def test_deploy_remake_cli(command_spec, docker_registry, cli_runner, run_prefix
 
     concatenate_spec = {
         "title": "a test image",
-        "command": command_spec,
+        "commands": {"test-command": command_spec},
         "version": {"package": "1.0", "build": "1"},
         "packages": {"system": ["vim"]},
         "name": "test_deploy_rebuild_cli",
@@ -186,17 +186,18 @@ docs:
   info_url: https://example.com
   description: >-
     a test of the YAML join functionality
-command:
-  task: frametree.testing.tasks:identity_file
-  row_frequency: common:Samples[sample]
-  inputs:
-    in_file:
-      datatype: text/text-file
-      help: the input file
-  outputs:
-    out_file:
-      datatype: text/text-file
-      help: the output file
+commands:
+  identity-task:
+    task: frametree.testing.tasks:identity_file
+    row_frequency: common:Samples[sample]
+    inputs:
+      in_file:
+        datatype: text/text-file
+        help: the input file
+    outputs:
+      out_file:
+        datatype: text/text-file
+        help: the output file
     """.strip(),
         """
 ---
@@ -219,7 +220,7 @@ weight: 10
 
 a test of the YAML join functionality
 
-## Command
+## Commands
 |Key|Value|
 |---|-----|
 |Task|frametree.testing.tasks:identity_file|
@@ -274,7 +275,8 @@ licenses:
     description: >
       license description
     info_url: http://path.to.license.provider.org/licenses
-command:
+commands:
+  bids-task:
     task: bids:bids_app
     inputs:
       T1w:
@@ -342,7 +344,7 @@ a longer description
 |----|---|-----------|
 |freesurfer|`http://path.to.license.provider.org/licenses`|license description|
 
-## Command
+## Commands
 |Key|Value|
 |---|-----|
 |Task|bids:bids_app|

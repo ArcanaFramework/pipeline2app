@@ -93,6 +93,14 @@ def execution(func):
                 "Execution", help=("Control over how the pipelines are executed")
             ),
             optgroup.option(
+                "--command",
+                type=str,
+                default=None,
+                help=(
+                    "Which command to run, defaults to the first (or only) command installed."
+                ),
+            ),
+            optgroup.option(
                 "--work",
                 "-w",
                 "work_dir",

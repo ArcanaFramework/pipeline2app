@@ -26,34 +26,36 @@ def get_pipeline_image(license_path: str, app_cls: ty.Type[App] = App) -> App:
                 "description": "This is a license to test the build structure",
             }
         },
-        command={
-            "task": "pipeline2app.testing.tasks:check_license",
-            "row_frequency": "common:Samples[sample]",
-            "inputs": [
-                {
-                    "name": LICENSE_INPUT_FIELD,
-                    "datatype": "text/plain",
-                    "field": "expected_license_contents",
-                    "help": "the path to the license",
-                },
-            ],
-            "outputs": [
-                {
-                    "name": LICENSE_OUTPUT_FIELD,
-                    "datatype": "text/plain",
-                    "field": "out",
-                    "help": "the validated license path",
-                }
-            ],
-            "parameters": [
-                {
-                    "name": LICENSE_PATH_PARAM,
-                    "datatype": "field/text",
-                    "field": "expected_license_path",
-                    "required": True,
-                    "help": "the expected contents of the license file",
-                }
-            ],
+        commands={
+            "check-license": {
+                "task": "pipeline2app.testing.tasks:check_license",
+                "row_frequency": "common:Samples[sample]",
+                "inputs": [
+                    {
+                        "name": LICENSE_INPUT_FIELD,
+                        "datatype": "text/plain",
+                        "field": "expected_license_contents",
+                        "help": "the path to the license",
+                    },
+                ],
+                "outputs": [
+                    {
+                        "name": LICENSE_OUTPUT_FIELD,
+                        "datatype": "text/plain",
+                        "field": "out",
+                        "help": "the validated license path",
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": LICENSE_PATH_PARAM,
+                        "datatype": "field/text",
+                        "field": "expected_license_path",
+                        "required": True,
+                        "help": "the expected contents of the license file",
+                    }
+                ],
+            },
         },
     )
 

@@ -60,6 +60,7 @@ class ContainerCommand:
     STORE_TYPE = "file_system"
     AXES: ty.Optional[ty.Type[Axes]] = None
 
+    name: str = attrs.field()
     task: pydra.engine.task.TaskBase = attrs.field(
         converter=ClassResolver(  # type: ignore[misc]
             TaskBase, alternative_types=[ty.Callable], package=PACKAGE_NAME
@@ -84,7 +85,7 @@ class ContainerCommand:
     configuration: ty.Dict[str, ty.Any] = attrs.field(
         factory=dict, converter=default_if_none(dict)  # type: ignore[misc]
     )
-    image: ty.Optional[App] = attrs.field(default=None)
+    image: App = attrs.field(default=None)
 
     def __attrs_post_init__(self) -> None:
         if isinstance(self.row_frequency, Axes):
@@ -107,14 +108,6 @@ class ContainerCommand:
                 f"Value for row_frequency must be provided to {type(self).__name__}.__init__ "
                 "because it doesn't have a defined AXES class attribute"
             )
-
-    @property
-    def name(self) -> str:
-        if self.image is None:
-            raise RuntimeError(
-                f"Cannot access name of unbound container commands {self}"
-            )
-        return self.image.name
 
     def input(self, name: str) -> CommandInput:
         try:
@@ -273,14 +266,21 @@ class ContainerCommand:
                 column = dataset[path]
                 logger.info(f"Found existing source column {column}")
             else:
-                logger.info(f"Adding new source column '{input_name}'")
-                column = dataset.add_source(
-                    name=input_name,
-                    datatype=inpt.column_defaults.datatype,
-                    path=path,
-                    is_regex=True,
-                    **source_kwargs,
-                )
+                default_column_name = f"{path2label(self.name)}_{input_name}"
+                try:
+                    column = dataset[default_column_name]
+                except KeyError:
+                    logger.info(f"Adding new source column '{default_column_name}'")
+                    column = dataset.add_source(
+                        name=default_column_name,
+                        datatype=inpt.column_defaults.datatype,
+                        path=path,
+                        is_regex=True,
+                        **source_kwargs,
+                    )
+                else:
+                    logger.info("Found existing source column %s", default_column_name)
+
             if input_config := inpt.config_dict:
                 input_configs.append(input_config)
             pipeline_inputs.append((column.name, inpt.field, inpt.datatype))
