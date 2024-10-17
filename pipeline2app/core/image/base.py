@@ -127,7 +127,7 @@ class P2AImage:
         build_dir: Path,
         use_local_packages: bool = False,
         pypi_fallback: bool = False,
-        pipeline2app_install_extras: ty.List[str] = (),
+        pipeline2app_install_extras: ty.Sequence[str] = (),
         resources: ty.Optional[ty.Dict[str, Path]] = None,
         resources_dir: ty.Optional[Path] = None,
         **kwargs: ty.Any,

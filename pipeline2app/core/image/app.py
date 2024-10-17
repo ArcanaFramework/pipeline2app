@@ -16,17 +16,13 @@ from frametree.core.serialize import (
     ObjectListConverter,
     ClassResolver,
 )
+from typing_extensions import Self
+from fileformats.core import DataType
 from frametree.core.axes import Axes
 from pipeline2app.core.utils import is_relative_to
 from ..command.base import ContainerCommand
 from .base import P2AImage
 from .components import ContainerAuthor, License, Docs, PipPackage
-
-
-try:
-    from typing import Self
-except ImportError:
-    from typing_extensions import Self
 
 
 logger = logging.getLogger("pipeline2app")
@@ -81,20 +77,31 @@ class App(P2AImage):
         metadata={"serializer": ObjectListConverter.asdict},
     )
     docs: Docs = attrs.field(converter=ObjectConverter(Docs))
-    command: ContainerCommand = attrs.field(converter=ObjectConverter(ContainerCommand))
+    commands: ty.List[ContainerCommand] = attrs.field(
+        converter=ObjectListConverter(ContainerCommand)
+    )
     loaded_from: Path = attrs.field(default=None, metadata={"asdict": False})
     pipeline2app_version: str = __version__
 
-    def __attrs_post_init__(self):
+    def __attrs_post_init__(self) -> None:
         # Set back-references to this image in the command spec
         self.command.image = self
 
-    def add_entrypoint(self, dockerfile: DockerRenderer, build_dir: Path):
+    def add_entrypoint(self, dockerfile: DockerRenderer, build_dir: Path) -> None:
         dockerfile.entrypoint(
             self.activate_conda() + ["pipeline2app", "pipeline-entrypoint"]
         )
 
-    def construct_dockerfile(self, build_dir: Path, **kwargs) -> DockerRenderer:
+    def construct_dockerfile(
+        self,
+        build_dir: Path,
+        use_local_packages: bool = False,
+        pypi_fallback: bool = False,
+        pipeline2app_install_extras: ty.Sequence[str] = (),
+        resources: ty.Optional[ty.Dict[str, Path]] = None,
+        resources_dir: ty.Optional[Path] = None,
+        **kwargs: ty.Any,
+    ) -> DockerRenderer:
         """Constructs a dockerfile that wraps a with dependencies
 
         Parameters
@@ -111,7 +118,15 @@ class App(P2AImage):
             Neurodocker Docker renderer to construct dockerfile from
         """
 
-        dockerfile = super().construct_dockerfile(build_dir, **kwargs)
+        dockerfile = super().construct_dockerfile(
+            build_dir=build_dir,
+            use_local_packages=use_local_packages,
+            pypi_fallback=pypi_fallback,
+            pipeline2app_install_extras=pipeline2app_install_extras,
+            resources=resources,
+            resources_dir=resources_dir,
+            **kwargs,
+        )
 
         self.install_licenses(
             dockerfile,
@@ -128,7 +143,7 @@ class App(P2AImage):
         self,
         dockerfile: DockerRenderer,
         build_dir: Path,
-    ):
+    ) -> None:
         """Generate Neurodocker instructions to install licenses within the container
         image
 
@@ -160,7 +175,7 @@ class App(P2AImage):
                         lic.column_name(lic.name),
                     )
 
-    def insert_spec(self, dockerfile: DockerRenderer, build_dir):
+    def insert_spec(self, dockerfile: DockerRenderer, build_dir: Path) -> None:
         """Generate Neurodocker instructions to save the specification inside the built
         image to be used when running the command and comparing against future builds
 
@@ -178,7 +193,7 @@ class App(P2AImage):
             source=["./pipeline2app-spec.yaml"], destination=self.IN_DOCKER_SPEC_PATH
         )
 
-    def save(self, yml_path: Path):
+    def save(self, yml_path: Path) -> None:
         """Saves the specification to a YAML file that can be loaded again
 
         Parameters
@@ -200,7 +215,7 @@ class App(P2AImage):
         licenses_to_download: set[str] = None,
         default_axes: ty.Type[Axes] = None,
         source_packages: ty.Sequence[Path] = (),
-        **kwargs,
+        **kwargs: ty.Any,
     ) -> "Self":
         """Loads a deploy-build specification from a YAML file
 
@@ -314,8 +329,8 @@ class App(P2AImage):
         return image
 
     @classmethod
-    def _load_yaml(cls, yaml_file: ty.Union[Path, str]):
-        def yaml_join(loader, node):
+    def _load_yaml(cls, yaml_file: ty.Union[Path, str]) -> ty.Dict[str, ty.Any]:
+        def yaml_join(loader: yaml.Loader, node: yaml.SequenceNode) -> str:
             seq = loader.construct_sequence(node)
             return "".join([str(i) for i in seq])
 
@@ -323,10 +338,12 @@ class App(P2AImage):
         yaml.SafeLoader.add_constructor(tag="!join", constructor=yaml_join)
         with open(yaml_file, "r") as f:
             dct = yaml.load(f, Loader=yaml.SafeLoader)
-        return dct
+        return dct  # type: ignore[no-any-return]
 
     @classmethod
-    def load_tree(cls, spec_path: Path, root_dir: Path, **kwargs) -> ty.List[Self]:
+    def load_tree(
+        cls, spec_path: Path, root_dir: Path, **kwargs: ty.Any
+    ) -> ty.List[Self]:
         """Walk the given directory structure and load all specs found within it
 
         Parameters
@@ -346,7 +363,7 @@ class App(P2AImage):
 
         return specs
 
-    def autodoc(self, doc_dir, flatten: bool):
+    def autodoc(self, doc_dir: Path, flatten: bool) -> None:
         header = {
             "title": self.name,
             "weight": 10,
@@ -464,7 +481,7 @@ class App(P2AImage):
                     )
                 f.write("\n")
 
-    def compare_specs(self, other, check_version=True):
+    def compare_specs(self, other: "App", check_version: bool = True) -> DeepDiff:
         """Compares two build specs against each other and returns the difference
 
         Parameters
@@ -485,7 +502,7 @@ class App(P2AImage):
         sdict = self.asdict()
         odict = other.asdict()
 
-        def prep(s):
+        def prep(s: ty.Dict[str, ty.Any]) -> ty.Dict[str, ty.Any]:
             dct = {
                 k: v
                 for k, v in s.items()
@@ -508,7 +525,7 @@ class App(P2AImage):
     #     return klass.load(yml_dct)
 
     @classmethod
-    def _data_format_html(cls, datatype):
+    def _data_format_html(cls, datatype: ty.Union[str, DataType]) -> str:
         datatype_str = datatype.mime_like if not isinstance(datatype, str) else datatype
 
         return (
@@ -534,11 +551,11 @@ class MarkdownTable:
         self.f = f
         self._write_header()
 
-    def _write_header(self):
+    def _write_header(self) -> None:
         self.write_row(*self.headers)
         self.write_row(*("-" * len(x) for x in self.headers))
 
-    def write_row(self, *cols: str):
+    def write_row(self, *cols: str) -> None:
         cols = list(cols)
         if len(cols) > len(self.headers):
             raise ValueError(

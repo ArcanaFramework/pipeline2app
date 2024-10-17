@@ -60,6 +60,7 @@ class ContainerCommand:
     STORE_TYPE = "file_system"
     AXES: ty.Optional[ty.Type[Axes]] = None
 
+    name: str = attrs.field()
     task: pydra.engine.task.TaskBase = attrs.field(
         converter=ClassResolver(  # type: ignore[misc]
             TaskBase, alternative_types=[ty.Callable], package=PACKAGE_NAME
@@ -107,14 +108,6 @@ class ContainerCommand:
                 f"Value for row_frequency must be provided to {type(self).__name__}.__init__ "
                 "because it doesn't have a defined AXES class attribute"
             )
-
-    @property
-    def name(self) -> str:
-        if self.image is None:
-            raise RuntimeError(
-                f"Cannot access name of unbound container commands {self}"
-            )
-        return self.image.name
 
     def input(self, name: str) -> CommandInput:
         try:
