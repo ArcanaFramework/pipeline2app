@@ -256,12 +256,6 @@ class ContainerCommand:
             inpt = self.input(input_name)
             path, qualifiers = self.extract_qualifiers_from_path(input_path)
             source_kwargs = qualifiers.pop("criteria", {})
-            converter_args[inpt.name] = qualifiers.pop("converter", {})
-            if qualifiers:
-                raise Pipeline2appUsageError(
-                    "Unrecognised qualifier namespaces extracted from path for "
-                    f"{inpt.name} (expected ['criteria', 'converter']): {qualifiers}"
-                )
             if input_path in dataset.columns:
                 column = dataset[path]
                 logger.info(f"Found existing source column {column}")
@@ -284,6 +278,12 @@ class ContainerCommand:
             if input_config := inpt.config_dict:
                 input_configs.append(input_config)
             pipeline_inputs.append((column.name, inpt.field, inpt.datatype))
+            converter_args[column.name] = qualifiers.pop("converter", {})
+            if qualifiers:
+                raise Pipeline2appUsageError(
+                    "Unrecognised qualifier namespaces extracted from path for "
+                    f"{inpt.name} (expected ['criteria', 'converter']): {qualifiers}"
+                )
 
         pipeline_inputs.extend(i for i in self.inputs if i.datatype is DataRow)
 
@@ -304,12 +304,6 @@ class ContainerCommand:
             if "@" not in path:
                 path = f"{path}@{dataset.name}"  # Add dataset namespace
             sink_name = path2label(path)
-            converter_args[sink_name] = qualifiers.pop("converter", {})
-            if qualifiers:
-                raise Pipeline2appUsageError(
-                    "Unrecognised qualifier namespaces extracted from path for "
-                    f"{output_name} (expected ['criteria', 'converter']): {qualifiers}"
-                )
             if sink_name in dataset.columns:
                 column = dataset[sink_name]
                 if not column.is_sink:
@@ -327,6 +321,12 @@ class ContainerCommand:
             if output_config := output.config_dict:
                 output_configs.append(output_config)
             pipeline_outputs.append((sink_name, output.field, output.datatype))
+            converter_args[sink_name] = qualifiers.pop("converter", {})
+            if qualifiers:
+                raise Pipeline2appUsageError(
+                    "Unrecognised qualifier namespaces extracted from path for "
+                    f"{output_name} (expected ['criteria', 'converter']): {qualifiers}"
+                )
 
         if not pipeline_outputs and self.outputs:
             raise ValueError(
