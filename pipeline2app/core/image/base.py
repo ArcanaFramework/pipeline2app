@@ -97,6 +97,7 @@ class P2AImage:
         build_dir: ty.Optional[Path] = None,
         generate_only: bool = False,
         no_cache: bool = False,
+        stream_output: ty.Optional[bool] = None,
         **kwargs: ty.Any,
     ) -> None:
         """Makes the container image from the spec: generates the Dockerfile and then
@@ -120,7 +121,11 @@ class P2AImage:
 
         if not generate_only:
             self.build(
-                dockerfile, build_dir, image_tag=self.reference, no_cache=no_cache
+                dockerfile,
+                build_dir,
+                image_tag=self.reference,
+                no_cache=no_cache,
+                stream_output=stream_output,
             )
 
     def construct_dockerfile(
