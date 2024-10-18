@@ -1,17 +1,17 @@
 from __future__ import annotations
 import typing as ty
-
-# import hashlib
 from pathlib import PurePath, Path
 import json
+import re
 import tempfile
+import itertools
 import logging
 from copy import copy
 import shutil
 from inspect import isclass, isfunction
 from build import ProjectBuilder
 import attrs
-import docker
+import docker.errors
 from neurodocker.reproenv import DockerRenderer
 from pipeline2app.core import __version__
 from pipeline2app.core import PACKAGE_NAME
@@ -97,6 +97,7 @@ class P2AImage:
         build_dir: ty.Optional[Path] = None,
         generate_only: bool = False,
         no_cache: bool = False,
+        stream_output: ty.Optional[bool] = None,
         **kwargs: ty.Any,
     ) -> None:
         """Makes the container image from the spec: generates the Dockerfile and then
@@ -109,8 +110,9 @@ class P2AImage:
         """
 
         if build_dir is None:
-            build_dir = tempfile.mkdtemp()
-        build_dir = Path(build_dir)
+            build_dir = Path(tempfile.mkdtemp())
+        elif not isinstance(build_dir, Path):
+            build_dir = Path(build_dir)
         if build_dir.exists():
             shutil.rmtree(build_dir)
         build_dir.mkdir()
@@ -119,7 +121,11 @@ class P2AImage:
 
         if not generate_only:
             self.build(
-                dockerfile, build_dir, image_tag=self.reference, no_cache=no_cache
+                dockerfile,
+                build_dir,
+                image_tag=self.reference,
+                no_cache=no_cache,
+                stream_output=stream_output,
             )
 
     def construct_dockerfile(
@@ -209,7 +215,8 @@ class P2AImage:
         build_dir: Path,
         image_tag: str,
         no_cache: bool = False,
-    ) -> None:
+        stream_output: ty.Optional[bool] = None,
+    ) -> str:
         """Builds the dockerfile in the specified build directory
 
         Parameters
@@ -222,8 +229,23 @@ class P2AImage:
             Docker image tag to assign to the built image
         no_cache : bool, optional
             whether to cache the build layers or not, by default False
-        """
+        stream_output : bool, optional
+            whether to stream the output of the build process to stdout as it is being
+            built. If None, the output will be streamed if the logger level is set to
+            INFO or lower, by default None
 
+        Returns
+        -------
+        str
+            the image ID of the built image
+
+        Raises
+        ------
+        docker.errors.BuildError
+            If the build process fails
+        """
+        if stream_output is None:
+            stream_output = logger.level <= logging.INFO
         # Save generated dockerfile to file
         out_file = build_dir / "Dockerfile"
         out_file.parent.mkdir(exist_ok=True, parents=True)
@@ -232,15 +254,32 @@ class P2AImage:
         logger.info("Dockerfile for '%s' generated at %s", image_tag, str(out_file))
 
         dc = docker.from_env()
-        try:
-            dc.images.build(path=str(build_dir), tag=image_tag, nocache=no_cache)
-        except docker.errors.BuildError as e:
-            build_log = "\n".join(ln.get("stream", "") for ln in e.build_log)
-            raise RuntimeError(
-                f"Building '{image_tag}' from '{str(build_dir)}/Dockerfile' "
-                f"failed with the following errors:\n\n{build_log}"
-            )
-        logging.info("Successfully built docker image %s", image_tag)
+
+        response = dc.api.build(
+            path=str(build_dir.absolute()), tag=image_tag, rm=True, decode=True
+        )
+        last_event = None
+        result_stream, progress_stream = itertools.tee(response)
+        for chunk in progress_stream:
+            if "stream" in chunk:
+                if stream_output:
+                    print(chunk["stream"], end="")
+                match = re.search(
+                    r"(^Successfully built |sha256:)([0-9a-f]+)$", chunk["stream"]
+                )
+                if match:
+                    logging.info("Successfully built docker image %s", image_tag)
+                    return match.group(2)
+            if "error" in chunk:
+                raise docker.errors.BuildError(
+                    chunk["error"],
+                    (
+                        f"Building '{image_tag}' from '{str(build_dir)}/Dockerfile': "
+                        + str(result_stream)
+                    ),
+                )
+            last_event = chunk
+        raise docker.errors.BuildError(last_event or "Unknown", result_stream)
 
     def init_dockerfile(self) -> DockerRenderer:
         dockerfile = DockerRenderer(self.base_image.package_manager).from_(

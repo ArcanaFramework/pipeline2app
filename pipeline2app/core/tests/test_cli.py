@@ -65,6 +65,7 @@ def test_deploy_make_cli(command_spec, cli_runner, work_dir):
             "--raise-errors",
             "--for-localhost",
             "--dont-check-registry",
+            "--stream-logs",
         ],
     )
     assert result.exit_code == 0, show_cli_trace(result)

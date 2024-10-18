@@ -27,7 +27,7 @@ from frametree.testing.blueprint import (
 from frametree.testing import TestAxes, MockRemote, AlternateMockRemote
 from frametree.common import FileSystem
 
-log_level = logging.WARNING
+log_level = logging.INFO
 
 logger = logging.getLogger("pipeline2app")
 logger.setLevel(log_level)

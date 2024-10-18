@@ -236,6 +236,15 @@ containing multiple specifications
         "the name of a resource within the spec"
     ),
 )
+@click.option(
+    "--stream-logs/--no-stream-logs",
+    type=bool,
+    default=None,
+    help=(
+        "Stream the build logs to stdout as they are generated. "
+        "Defaults to True if the log-level <= info"
+    ),
+)
 def make(
     target: str,
     spec_path: Path,
@@ -261,6 +270,7 @@ def make(
     spec_root: Path,
     source_package: ty.Sequence[Path],
     export_files: ty.Sequence[ty.Tuple[Path, Path]],
+    stream_logs: ty.Optional[bool],
 ) -> None:
 
     if isinstance(spec_path, bytes):  # FIXME: This shouldn't be necessary
@@ -268,7 +278,7 @@ def make(
     if isinstance(build_dir, bytes):  # FIXME: This shouldn't be necessary
         build_dir = Path(build_dir.decode("utf-8"))
 
-    resources: list[tuple[str, Path]] = []
+    resources: ty.List[ty.Tuple[str, Path]] = []
     for rname, rpath in resource:
         rpath = Path(rpath)
         if not rpath.exists():
@@ -333,7 +343,7 @@ def make(
     # aren't present in the build environment
     # FIXME: need to test for this
     with ClassResolver.FALLBACK_TO_STR:
-        image_specs: ty.List[target_cls] = target_cls.load_tree(
+        image_specs: ty.List[App] = target_cls.load_tree(
             spec_path,
             root_dir=spec_root,
             registry=registry,
@@ -417,6 +427,7 @@ def make(
                 resources=resources,
                 resources_dir=resources_dir,
                 no_cache=clean_up,
+                stream_logs=stream_logs,
             )
         except Exception:
             if raise_errors:
