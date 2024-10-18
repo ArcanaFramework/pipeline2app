@@ -60,6 +60,7 @@ class ContainerCommand:
     STORE_TYPE = "file_system"
     AXES: ty.Optional[ty.Type[Axes]] = None
 
+    name: str = attrs.field()
     task: pydra.engine.task.TaskBase = attrs.field(
         converter=ClassResolver(  # type: ignore[misc]
             TaskBase, alternative_types=[ty.Callable], package=PACKAGE_NAME
@@ -84,7 +85,7 @@ class ContainerCommand:
     configuration: ty.Dict[str, ty.Any] = attrs.field(
         factory=dict, converter=default_if_none(dict)  # type: ignore[misc]
     )
-    image: ty.Optional[App] = attrs.field(default=None)
+    image: App = attrs.field(default=None)
 
     def __attrs_post_init__(self) -> None:
         if isinstance(self.row_frequency, Axes):
@@ -107,14 +108,6 @@ class ContainerCommand:
                 f"Value for row_frequency must be provided to {type(self).__name__}.__init__ "
                 "because it doesn't have a defined AXES class attribute"
             )
-
-    @property
-    def name(self) -> str:
-        if self.image is None:
-            raise RuntimeError(
-                f"Cannot access name of unbound container commands {self}"
-            )
-        return self.image.name
 
     def input(self, name: str) -> CommandInput:
         try:
@@ -263,27 +256,34 @@ class ContainerCommand:
             inpt = self.input(input_name)
             path, qualifiers = self.extract_qualifiers_from_path(input_path)
             source_kwargs = qualifiers.pop("criteria", {})
-            converter_args[inpt.name] = qualifiers.pop("converter", {})
+            if input_path in dataset.columns:
+                column = dataset[path]
+                logger.info(f"Found existing source column {column}")
+            else:
+                default_column_name = f"{path2label(self.name)}_{input_name}"
+                try:
+                    column = dataset[default_column_name]
+                except KeyError:
+                    logger.info(f"Adding new source column '{default_column_name}'")
+                    column = dataset.add_source(
+                        name=default_column_name,
+                        datatype=inpt.column_defaults.datatype,
+                        path=path,
+                        is_regex=True,
+                        **source_kwargs,
+                    )
+                else:
+                    logger.info("Found existing source column %s", default_column_name)
+
+            if input_config := inpt.config_dict:
+                input_configs.append(input_config)
+            pipeline_inputs.append((column.name, inpt.field, inpt.datatype))
+            converter_args[column.name] = qualifiers.pop("converter", {})
             if qualifiers:
                 raise Pipeline2appUsageError(
                     "Unrecognised qualifier namespaces extracted from path for "
                     f"{inpt.name} (expected ['criteria', 'converter']): {qualifiers}"
                 )
-            if input_path in dataset.columns:
-                column = dataset[path]
-                logger.info(f"Found existing source column {column}")
-            else:
-                logger.info(f"Adding new source column '{input_name}'")
-                column = dataset.add_source(
-                    name=input_name,
-                    datatype=inpt.column_defaults.datatype,
-                    path=path,
-                    is_regex=True,
-                    **source_kwargs,
-                )
-            if input_config := inpt.config_dict:
-                input_configs.append(input_config)
-            pipeline_inputs.append((column.name, inpt.field, inpt.datatype))
 
         pipeline_inputs.extend(i for i in self.inputs if i.datatype is DataRow)
 
@@ -304,12 +304,6 @@ class ContainerCommand:
             if "@" not in path:
                 path = f"{path}@{dataset.name}"  # Add dataset namespace
             sink_name = path2label(path)
-            converter_args[sink_name] = qualifiers.pop("converter", {})
-            if qualifiers:
-                raise Pipeline2appUsageError(
-                    "Unrecognised qualifier namespaces extracted from path for "
-                    f"{output_name} (expected ['criteria', 'converter']): {qualifiers}"
-                )
             if sink_name in dataset.columns:
                 column = dataset[sink_name]
                 if not column.is_sink:
@@ -327,6 +321,12 @@ class ContainerCommand:
             if output_config := output.config_dict:
                 output_configs.append(output_config)
             pipeline_outputs.append((sink_name, output.field, output.datatype))
+            converter_args[sink_name] = qualifiers.pop("converter", {})
+            if qualifiers:
+                raise Pipeline2appUsageError(
+                    "Unrecognised qualifier namespaces extracted from path for "
+                    f"{output_name} (expected ['criteria', 'converter']): {qualifiers}"
+                )
 
         if not pipeline_outputs and self.outputs:
             raise ValueError(

@@ -5,10 +5,12 @@ from datetime import datetime
 import shutil
 import docker
 from tempfile import mkdtemp
+import typing as ty
 from unittest.mock import patch
 import pytest
-from click.testing import CliRunner
+from click.testing import CliRunner, Result as CliResult
 from frametree.core.store import Store
+from frametree.core import FrameSet
 from fileformats.text import Plain as PlainText
 from pipeline2app.testing.tasks import (
     concatenate,
@@ -25,13 +27,6 @@ from frametree.testing.blueprint import (
 from frametree.testing import TestAxes, MockRemote, AlternateMockRemote
 from frametree.common import FileSystem
 
-# from pydra import set_input_validator
-
-# set_input_validator(True)
-
-
-# Set DEBUG logging for unittests
-
 log_level = logging.WARNING
 
 logger = logging.getLogger("pipeline2app")
@@ -47,7 +42,7 @@ PKG_DIR = Path(__file__).parent
 
 
 @pytest.fixture
-def work_dir():
+def work_dir() -> ty.Generator[Path, None, None]:
     # work_dir = Path.home() / '.pipeline2app-tests'
     # work_dir.mkdir(exist_ok=True)
     # return work_dir
@@ -57,7 +52,7 @@ def work_dir():
 
 
 @pytest.fixture(scope="session")
-def build_cache_dir():
+def build_cache_dir() -> Path:
     # build_cache_dir = Path.home() / '.pipeline2app-test-build-cache'
     # if build_cache_dir.exists():
     #     shutil.rmtree(build_cache_dir)
@@ -67,22 +62,24 @@ def build_cache_dir():
 
 
 @pytest.fixture
-def cli_runner(catch_cli_exceptions):
-    def invoke(*args, catch_exceptions=catch_cli_exceptions, **kwargs):
+def cli_runner(catch_cli_exceptions: bool) -> ty.Callable[..., ty.Any]:
+    def invoke(
+        *args: ty.Any, catch_exceptions: bool = catch_cli_exceptions, **kwargs: ty.Any
+    ) -> CliResult:
         runner = CliRunner()
-        result = runner.invoke(*args, catch_exceptions=catch_exceptions, **kwargs)
+        result = runner.invoke(*args, catch_exceptions=catch_exceptions, **kwargs)  # type: ignore[misc]
         return result
 
     return invoke
 
 
 @pytest.fixture(scope="session")
-def pkg_dir():
+def pkg_dir() -> Path:
     return PKG_DIR
 
 
 @pytest.fixture(scope="session")
-def run_prefix():
+def run_prefix() -> str:
     "A datetime string used to avoid stale data left over from previous tests"
     return datetime.strftime(datetime.now(), "%Y%m%d%H%M%S")
 
@@ -92,11 +89,12 @@ def run_prefix():
 if os.getenv("_PYTEST_RAISE", "0") != "0":
 
     @pytest.hookimpl(tryfirst=True)
-    def pytest_exception_interact(call):
-        raise call.excinfo.value
+    def pytest_exception_interact(call: pytest.CallInfo[ty.Any]) -> None:
+        if call.excinfo is not None:
+            raise call.excinfo.value
 
     @pytest.hookimpl(tryfirst=True)
-    def pytest_internalerror(excinfo):
+    def pytest_internalerror(excinfo: pytest.ExceptionInfo[BaseException]) -> None:
         raise excinfo.value
 
     CATCH_CLI_EXCEPTIONS = False
@@ -105,12 +103,12 @@ else:
 
 
 @pytest.fixture
-def catch_cli_exceptions():
+def catch_cli_exceptions() -> bool:
     return CATCH_CLI_EXCEPTIONS
 
 
 @pytest.fixture(params=BASIC_TASKS)
-def pydra_task_details(request):
+def pydra_task_details(request: pytest.FixtureRequest) -> ty.Tuple[str, ...]:
     func_name = request.param
     return ("pipeline2app.analysis.tasks.tests.fixtures" + func_name,) + tuple(
         TEST_TASKS[func_name][1:]
@@ -118,10 +116,10 @@ def pydra_task_details(request):
 
 
 @pytest.fixture(params=BASIC_TASKS)
-def pydra_task(request):
+def pydra_task(request: pytest.FixtureRequest) -> ty.Callable[..., ty.Any]:
     task, args, expected_out = TEST_TASKS[request.param]
     task.test_args = args  # stash args away in task object for future access
-    return task
+    return task  # type: ignore[no-any-return]
 
 
 # ------------------------------------
@@ -132,14 +130,16 @@ DATA_STORES = ["file_system", "mock_remote"]
 
 
 @pytest.fixture(scope="session")
-def frametree_home() -> Path:
+def frametree_home() -> ty.Generator[Path, None, None]:
     frametree_home = Path(mkdtemp()) / "frametree-home"
     with patch.dict(os.environ, {"FRAMETREE_HOME": str(frametree_home)}):
         yield frametree_home
 
 
 @pytest.fixture(params=DATA_STORES)
-def data_store(work_dir: Path, frametree_home: Path, request):
+def data_store(
+    work_dir: Path, frametree_home: Path, request: pytest.FixtureRequest
+) -> ty.Generator[Store, None, None]:
     store: Store
     if request.param == "file_system":
         store = FileSystem()
@@ -168,7 +168,7 @@ def data_store(work_dir: Path, frametree_home: Path, request):
 def delayed_mock_remote(
     work_dir: Path,
     frametree_home: Path,  # So we save the store definition in the home dir, not ~/.pipeline2app
-):
+) -> MockRemote:
     cache_dir = work_dir / "mock-remote-store" / "cache"
     cache_dir.mkdir(parents=True)
     remote_dir = work_dir / "mock-remote-store" / "remote"
@@ -187,7 +187,9 @@ def delayed_mock_remote(
 
 
 @pytest.fixture(params=GOOD_DATASETS)
-def dataset(work_dir, data_store, request):
+def dataset(
+    work_dir: Path, data_store: Store, request: pytest.FixtureRequest
+) -> FrameSet:
     dataset_name = request.param
     blueprint = TEST_DATASET_BLUEPRINTS[dataset_name]
     dataset_path = work_dir / dataset_name
@@ -198,7 +200,7 @@ def dataset(work_dir, data_store, request):
 
 
 @pytest.fixture
-def simple_dataset_blueprint():
+def simple_dataset_blueprint() -> TestDatasetBlueprint:
     return TestDatasetBlueprint(
         hierarchy=[
             "abcd"
@@ -213,7 +215,10 @@ def simple_dataset_blueprint():
 
 
 @pytest.fixture
-def saved_dataset(data_store, simple_dataset_blueprint, work_dir):
+def saved_dataset(
+    data_store: Store, simple_dataset_blueprint: TestDatasetBlueprint, work_dir: Path
+) -> FrameSet:
+    dataset_id: ty.Union[Path, str]
     if isinstance(data_store, FileSystem):
         dataset_id = work_dir / "saved-dataset"
     else:
@@ -222,25 +227,25 @@ def saved_dataset(data_store, simple_dataset_blueprint, work_dir):
 
 
 @pytest.fixture
-def tmp_dir():
+def tmp_dir() -> ty.Generator[Path, None, None]:
     tmp_dir = Path(mkdtemp())
     yield tmp_dir
     shutil.rmtree(tmp_dir)
 
 
 @pytest.fixture(params=["forward", "reverse"])
-def concatenate_task(request):
+def concatenate_task(request: pytest.FixtureRequest) -> ty.Callable[..., ty.Any]:
     if request.param == "forward":
         task = concatenate
         # FIXME: Can be removed after https://github.com/nipype/pydra/pull/533 is merged
         task.__name__ = "concatenate"
     else:
         task = concatenate_reverse
-    return task
+    return task  # type: ignore[no-any-return]
 
 
 @pytest.fixture(scope="session")
-def command_spec():
+def command_spec() -> ty.Dict[str, ty.Any]:
     return {
         "task": "pipeline2app.testing.tasks:concatenate",
         "inputs": {
@@ -282,7 +287,7 @@ def command_spec():
 
 
 @pytest.fixture(scope="session")
-def docker_registry():
+def docker_registry() -> ty.Generator[str, None, None]:
 
     IMAGE = "docker.io/registry"
     PORT = "5557"

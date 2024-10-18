@@ -127,7 +127,7 @@ class P2AImage:
         build_dir: Path,
         use_local_packages: bool = False,
         pypi_fallback: bool = False,
-        pipeline2app_install_extras: ty.List[str] = (),
+        pipeline2app_install_extras: ty.Sequence[str] = (),
         resources: ty.Optional[ty.Dict[str, Path]] = None,
         resources_dir: ty.Optional[Path] = None,
         **kwargs: ty.Any,
@@ -531,12 +531,14 @@ class P2AImage:
         """Return a serialized version of the pipeline image specification that can be
         written to file"""
 
-        def filter(attr: attrs.Attribute, value: ty.Any) -> bool:
+        def filter(attr: attrs.Attribute[ty.Any], value: ty.Any) -> bool:
             return not isinstance(value, type(self)) and attr.metadata.get(
                 "asdict", True
             )
 
-        def serializer(_: ty.Any, attr: attrs.Attribute, value: ty.Any) -> ty.Any:
+        def serializer(
+            _: ty.Any, attr: attrs.Attribute[ty.Any], value: ty.Any
+        ) -> ty.Any:
             if attr is not None and "serializer" in attr.metadata:
                 value = attr.metadata["serializer"](
                     value,
@@ -544,7 +546,7 @@ class P2AImage:
                     filter=filter,
                 )
             elif isinstance(value, Axes):
-                if hasattr(self, "command") and self.command.AXES:
+                if hasattr(self, "commands") and self.commands[0].AXES:
                     value = str(value)
                 else:
                     value = value.tostr()
