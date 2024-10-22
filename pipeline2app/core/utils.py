@@ -4,13 +4,14 @@ import logging
 from pathlib import Path, PosixPath
 import tempfile
 import tarfile
+import requests
 import docker
 
 logger = logging.getLogger("pipeline2app")
 
 
 def extract_file_from_docker_image(
-    image_tag, file_path: PosixPath, out_path: ty.Optional[Path] = None
+    image_tag: str, file_path: PosixPath, out_path: ty.Optional[Path] = None
 ) -> Path:
     """Extracts a file from a Docker image onto the local host
 
@@ -31,7 +32,7 @@ def extract_file_from_docker_image(
         out_path = tmp_dir / "extracted-dir"
     dc = docker.from_env()
 
-    def get_image(tag):
+    def get_image(tag: str) -> ty.Any:
         for img in dc.images.list():
             if tag in img.tags:
                 return img
@@ -98,6 +99,31 @@ def is_relative_to(a: Path, b: Path) -> bool:
         return False
     else:
         return True
+
+
+def list_docker_tags(image_reference: str) -> ty.List[str]:
+    """List all the tags for the given docker image reference
+
+    Parameters
+    ----------
+    image_reference: str
+        the reference for the Docker image to check
+
+    Returns
+    -------
+    list[str]
+        the list of tags found in the registry
+    """
+    registry, image_path = image_reference.split("/", maxsplit=1)
+    url = f"https://{registry}/v2/{image_path}/tags/list"
+    headers = {
+        "Accept": "application/vnd.github.v3+json",
+    }
+    response = requests.get(url, headers=headers)
+    if response.status_code != 200:
+        response.raise_for_status()
+    tags: ty.List[str] = response.json().get("tags", [])
+    return tags
 
 
 DOCKER_HUB = "docker.io"
