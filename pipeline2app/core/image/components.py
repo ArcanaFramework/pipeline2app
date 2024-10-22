@@ -355,7 +355,7 @@ class NeurodockerTemplate:
 
     name: str
     version: str
-    optional_args: ty.Dict[str, ty.Any] = attrs.field(factory=dict)
+    args: ty.Dict[str, ty.Any] = attrs.field(factory=dict)
 
 
 def python_package_converter(
