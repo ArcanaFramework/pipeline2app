@@ -520,7 +520,7 @@ class P2AImage:
             kwds = attrs.asdict(template)
             # so we can pop the name and opt args and leave the original dictionary intact
             kwds = copy(kwds)
-            kwds.update(kwds.pop("optional_args", {}))
+            kwds.update(kwds.pop("args", {}))
             dockerfile.add_registered_template(kwds.pop("name"), **kwds)
 
     @classmethod
