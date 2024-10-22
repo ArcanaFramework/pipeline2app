@@ -89,38 +89,6 @@ class BaseImage:
 
 
 @attrs.define
-class Version:
-    """Version of the app, derived from a combination of the underlying package version
-    and the "build version" of the YAML spec"""
-
-    package: str
-    build: ty.Optional[str] = None
-    prerelease: ty.Optional[str] = None
-
-    def __str__(self) -> str:
-        tag = self.package
-        if self.prerelease:
-            tag += "-" + self.prerelease
-        if self.build:
-            tag += "-" + str(self.build)
-        return tag
-
-    def __repr__(self) -> str:
-        rpr = f"Version(package={self.package}"
-        if self.build:
-            rpr += f", build={self.build}"
-        if self.prerelease:
-            rpr += f", prerelease={self.prerelease}"
-        return rpr + ")"
-
-    def build_info(self) -> str:
-        info = self.build if self.build else "0"
-        if self.prerelease:
-            info += f" ({self.prerelease})"
-        return info
-
-
-@attrs.define
 class ContainerAuthor:
 
     name: str

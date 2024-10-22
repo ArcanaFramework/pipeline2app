@@ -4,7 +4,9 @@ from pathlib import PurePath, Path
 import json
 import re
 import tempfile
+import requests
 import itertools
+from functools import cached_property
 import logging
 from copy import copy
 import shutil
@@ -23,7 +25,7 @@ from frametree.core.serialize import (
 from frametree.core.axes import Axes
 from pipeline2app.core.utils import DOCKER_HUB
 from pipeline2app.core.exceptions import Pipeline2appBuildError
-from .components import Packages, BaseImage, PipPackage, Version, Resource
+from .components import Packages, BaseImage, PipPackage, Resource
 
 logger = logging.getLogger("pipeline2app")
 
@@ -36,7 +38,7 @@ class P2AImage:
 
     name : str
         name of the package/pipeline
-    version : Version
+    version : str
         version of the package/pipeline
     org : str
         the organisation the image will be tagged within
@@ -60,7 +62,7 @@ class P2AImage:
     PIP_DEPENDENCIES = ()
 
     name: str
-    version: Version = attrs.field(converter=ObjectConverter(Version))
+    version: str
     base_image: BaseImage = attrs.field(
         default=BaseImage(), converter=ObjectConverter(BaseImage)
     )
@@ -75,7 +77,7 @@ class P2AImage:
     org: ty.Optional[str] = None
     registry: str = DOCKER_HUB
     readme: ty.Optional[str] = None
-    labels: ty.Dict[str, str] = None
+    labels: ty.Optional[ty.Dict[str, str]] = None
     schema_version: str = SCHEMA_VERSION
 
     @property
@@ -98,6 +100,7 @@ class P2AImage:
         generate_only: bool = False,
         no_cache: bool = False,
         stream_output: ty.Optional[bool] = None,
+        reference: ty.Optional[str] = None,
         **kwargs: ty.Any,
     ) -> None:
         """Makes the container image from the spec: generates the Dockerfile and then
@@ -107,6 +110,20 @@ class P2AImage:
         ----------
         build_dir : Path, optional
             _description_, by default None
+        generate_only: bool, optional
+            whether to only generate the Dockerfile and not build the image, by default
+            False
+        no_cache : bool, optional
+            whether to cache the build layers or not, by default False
+        stream_output : bool, optional
+            whether to stream the output of the build process to stdout as it is being
+            built. If None, the output will be streamed if the logger level is set to
+            INFO or lower, by default None
+        reference : str, optional
+            the tag to assign to the built image, by default the one constructed from
+            the image spec will be used
+        **kwargs : Any
+            additional keyword arguments to pass to the Dockerfile constructor
         """
 
         if build_dir is None:
@@ -123,10 +140,48 @@ class P2AImage:
             self.build(
                 dockerfile,
                 build_dir,
-                image_tag=self.reference,
+                image_reference=(
+                    reference if reference is not None else self.reference
+                ),
                 no_cache=no_cache,
                 stream_output=stream_output,
+                reference=reference,
             )
+
+    @cached_property
+    def registry_tags(self) -> ty.List[str]:
+        """List all the tags for the given docker image reference within the registry"""
+        tags: ty.List[str]
+        if self.registry == "ghcr.io":
+            token_uri = f"https://{self.registry}/token?scope=repository:{self.org}/{self.name}:pull"
+            response = requests.get(token_uri)
+            if response.status_code != 200:
+                response.raise_for_status()
+            registry_token = response.json().get("token")
+            url = f"https://{self.registry}/v2/{self.org}/{self.name}/tags/list"
+            headers = {
+                "Accept": "application/vnd.github.v3+json",
+                "Authorization": f"Bearer {registry_token}",
+            }
+            response = requests.get(url, headers=headers)
+            if response.status_code != 200:
+                response.raise_for_status()
+            tags = response.json().get("tags", [])
+        elif self.registry == DOCKER_HUB:
+            url = f"https://hub.docker.com/v2/repositories/{self.org}/{self.name}/tags/"
+            tags = []
+            while url:
+                response = requests.get(url)
+                if response.status_code != 200:
+                    response.raise_for_status()
+                data = response.json()
+                tags.extend(tag["name"] for tag in data["results"])
+                url = data["next"]  # Get the URL for the next page of results
+        else:
+            raise NotImplementedError(
+                f"Registry '{self.registry}' not supported for listing tags yet"
+            )
+        return tags
 
     def construct_dockerfile(
         self,
@@ -213,9 +268,10 @@ class P2AImage:
         cls,
         dockerfile: DockerRenderer,
         build_dir: Path,
-        image_tag: str,
+        image_reference: str,
         no_cache: bool = False,
         stream_output: ty.Optional[bool] = None,
+        reference: ty.Optional[str] = None,
     ) -> str:
         """Builds the dockerfile in the specified build directory
 
@@ -225,7 +281,7 @@ class P2AImage:
             Neurodocker renderer to build
         build_dir : Path
             path of the build directory
-        image_tag : str
+        image_reference : str
             Docker image tag to assign to the built image
         no_cache : bool, optional
             whether to cache the build layers or not, by default False
@@ -251,12 +307,14 @@ class P2AImage:
         out_file.parent.mkdir(exist_ok=True, parents=True)
         with open(str(out_file), "w") as f:
             f.write(dockerfile.render())
-        logger.info("Dockerfile for '%s' generated at %s", image_tag, str(out_file))
+        logger.info(
+            "Dockerfile for '%s' generated at %s", image_reference, str(out_file)
+        )
 
         dc = docker.from_env()
 
         response = dc.api.build(
-            path=str(build_dir.absolute()), tag=image_tag, rm=True, decode=True
+            path=str(build_dir.absolute()), tag=image_reference, rm=True, decode=True
         )
         last_event = None
         result_stream, progress_stream = itertools.tee(response)
@@ -268,13 +326,13 @@ class P2AImage:
                     r"(^Successfully built |sha256:)([0-9a-f]+)$", chunk["stream"]
                 )
                 if match:
-                    logging.info("Successfully built docker image %s", image_tag)
+                    logging.info("Successfully built docker image %s", image_reference)
                     return match.group(2)
             if "error" in chunk:
                 raise docker.errors.BuildError(
                     chunk["error"],
                     (
-                        f"Building '{image_tag}' from '{str(build_dir)}/Dockerfile': "
+                        f"Building '{image_reference}' from '{str(build_dir)}/Dockerfile': "
                         + str(result_stream)
                     ),
                 )

@@ -38,7 +38,7 @@ class App(P2AImage):
         a name of the app to be used in naming of packages/images
     title : str
         a single line description of the app to be exposed in UIs
-    version : Version
+    version : str
         version of the package/build of the app
     org : str
         the organisation the image will be tagged within
@@ -368,7 +368,7 @@ class App(P2AImage):
 
     @classmethod
     def load_tree(
-        cls, spec_path: Path, root_dir: Path, **kwargs: ty.Any
+        cls, spec_path: Path, root_dir: ty.Optional[Path] = None, **kwargs: ty.Any
     ) -> ty.List[Self]:
         """Walk the given directory structure and load all specs found within it
 
@@ -379,6 +379,15 @@ class App(P2AImage):
         root_dir : Path
             path to the base of the spec directory
         """
+        spec_path = Path(spec_path)
+        if root_dir is None:
+            if spec_path.is_file():
+                raise ValueError(
+                    "If a single file is provided, the root_dir must be specified"
+                )
+            logger.info("No root directory specified, using the spec directory")
+            root_dir = spec_path
+        root_dir = Path(root_dir)
         if spec_path.is_file():
             return [cls.load(spec_path, root_dir=root_dir, **kwargs)]
         specs = []

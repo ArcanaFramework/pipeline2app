@@ -1,7 +1,7 @@
 import sys
 import logging
 import shutil
-from pathlib import Path
+from pathlib import Path, PosixPath
 import json
 import typing as ty
 import re
@@ -22,14 +22,13 @@ from frametree.core.packaging import submodules
 import pipeline2app
 from pipeline2app.core import __version__
 from pipeline2app.core.image import Metapackage, App
-from pipeline2app.core.exceptions import Pipeline2appBuildError
 from pipeline2app.core.utils import (
     extract_file_from_docker_image,
     DOCKER_HUB,
-    list_registry_tags,
 )
 from pipeline2app.core.command import entrypoint_opts
 from pipeline2app.core import PACKAGE_NAME
+from .version import Version
 
 
 logger = logging.getLogger("pipeline2app")
@@ -165,7 +164,7 @@ containing multiple specifications
 @click.option(
     "--check-registry/--dont-check-registry",
     type=bool,
-    default=False,
+    default=None,
     help=(
         "Check the registry to see if an existing image with the "
         "same tag is present, and if so whether the specification "
@@ -266,7 +265,7 @@ def make(
     for_localhost: bool,
     license: ty.List[ty.Tuple[str, Path]],
     license_to_download: ty.List[str],
-    check_registry: bool,
+    check_registry: ty.Optional[bool],
     push: bool,
     clean_up: bool,
     resource: ty.List[ty.Tuple[str, str]],
@@ -276,6 +275,9 @@ def make(
     export_files: ty.Sequence[ty.Tuple[Path, Path]],
     stream_logs: ty.Optional[bool],
 ) -> None:
+
+    if check_registry is None:
+        check_registry = push
 
     if isinstance(spec_path, bytes):  # FIXME: This shouldn't be necessary
         spec_path = Path(spec_path.decode("utf-8"))
@@ -358,56 +360,9 @@ def make(
 
     # Check the target registry to see a) if the images with the same tag
     # already exists and b) whether it was built with the same specs
-    if check_registry:
-        conflicting = {}
-        to_build = []
-        for image_spec in image_specs:
 
-            registry_tags = list_registry_tags(image_spec.path)
-            logger.info("Found the following tags in the registry: %s", registry_tags)
-            try:
-                extracted_file = extract_file_from_docker_image(
-                    image_spec.reference, image_spec.IN_DOCKER_SPEC_PATH
-                )
-            except docker.errors.NotFound:
-                extracted_file = None
-            if extracted_file is None:
-                logger.info(
-                    f"Did not find existing image matching {image_spec.reference}"
-                )
-                changelog = None
-            else:
-                logger.info(
-                    f"Comparing build spec with that of existing image {image_spec.reference}"
-                )
-                built_spec = image_spec.load(extracted_file)
-
-                changelog = image_spec.compare_specs(built_spec, check_version=True)
-
-            if changelog is None:
-                to_build.append(image_spec)
-            elif not changelog:
-                logger.info(
-                    "Skipping '%s' build as identical image already "
-                    "exists in registry"
-                )
-            else:
-                conflicting[image_spec.reference] = changelog
-
-        if conflicting:
-            msg = ""
-            for tag, changelog in conflicting.items():
-                msg += (
-                    f"spec for '{tag}' doesn't match the one that was "
-                    "used to build the image already in the registry:\n\n"
-                    + str(changelog.pretty())
-                    + "\n\n\n"
-                )
-
-            raise Pipeline2appBuildError(msg)
-
-        image_specs = to_build
-
+    errors = False
+    conflicting = {}
     if release or save_manifest:
         manifest = {
             "package": package_name,
@@ -416,9 +371,52 @@ def make(
         if release:
             manifest["release"] = ":".join(release)
 
-    errors = False
-
     for image_spec in image_specs:
+        image_reference = image_spec.reference
+        if check_registry:
+
+            logger.info(
+                "Found the following tags in the registry to check against: %s",
+                image_spec.registry_tags,
+            )
+            registry_versions = sorted(
+                Version.parse(t) for t in image_spec.registry_tags
+            )
+            latest_version = registry_versions[-1] if registry_versions else None
+            image_version = Version.parse(image_spec.version)
+            if latest_version and latest_version >= image_version:
+                latest_reference = f"{image_spec.path}:{latest_version}"
+                try:
+                    extracted_file = extract_file_from_docker_image(
+                        latest_reference, PosixPath(image_spec.IN_DOCKER_SPEC_PATH)
+                    )
+                except docker.errors.NotFound:
+                    extracted_file = None
+                if extracted_file is None:
+                    logger.warning(
+                        "Could not extract spec from existing image '%s' to check for changes "
+                        "assuming it is different",
+                        latest_reference,
+                    )
+                    changelog = None
+                else:
+                    logger.info(
+                        "Comparing build spec with that of existing image %s",
+                        latest_reference,
+                    )
+                    built_spec = image_spec.load(extracted_file)
+
+                    changelog = image_spec.compare_specs(built_spec, check_version=True)
+
+                    if not changelog:
+                        logger.info(
+                            "Skipping '%s' build as identical image already "
+                            "exists in registry"
+                        )
+                        continue
+                    conflicting[image_spec.reference] = (latest_reference, changelog)
+                image_reference = f"{image_spec.path}:{latest_version.bump_postfix()}"
+
         spec_build_dir = (
             build_dir / image_spec.loaded_from.relative_to(spec_path.absolute())
         ).with_suffix("")
@@ -435,33 +433,32 @@ def make(
                 resources_dir=resources_dir,
                 no_cache=clean_up,
                 stream_logs=stream_logs,
+                reference=image_reference,
             )
         except Exception:
             if raise_errors:
                 raise
             logger.error(
-                "Could not build %s pipeline:\n%s", image_spec.reference, format_exc()
+                "Could not build %s pipeline:\n%s", image_reference, format_exc()
             )
             errors = True
             continue
         else:
-            click.echo(image_spec.reference)
-            logger.info("Successfully built %s pipeline", image_spec.reference)
+            click.echo(image_reference)
+            logger.info("Successfully built %s pipeline", image_reference)
 
         if push:
             try:
-                dc.api.push(image_spec.reference)
+                dc.api.push(image_reference)
             except Exception:
                 if raise_errors:
                     raise
                 logger.error(
-                    "Could not push '%s':\n\n%s", image_spec.reference, format_exc()
+                    "Could not push '%s':\n\n%s", image_reference, format_exc()
                 )
                 errors = True
             else:
-                logger.info(
-                    "Successfully pushed '%s' to registry", image_spec.reference
-                )
+                logger.info("Successfully pushed '%s' to registry", image_reference)
         if clean_up:
 
             def remove_image_and_containers(image_ref: str) -> None:
@@ -482,14 +479,15 @@ def make(
                     result["SpaceReclaimed"],
                 )
 
-            remove_image_and_containers(image_spec.reference)
+            remove_image_and_containers(image_reference)
             remove_image_and_containers(image_spec.base_image.reference)
 
         if release or save_manifest:
+            path, tag = image_reference.split(":")
             manifest["images"].append(
                 {
-                    "name": image_spec.path,
-                    "version": image_spec.tag,
+                    "name": path,
+                    "version": tag,
                 }
             )
     if release:

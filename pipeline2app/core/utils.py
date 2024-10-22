@@ -4,7 +4,6 @@ import logging
 from pathlib import Path, PosixPath
 import tempfile
 import tarfile
-import requests
 import docker
 
 logger = logging.getLogger("pipeline2app")
@@ -99,31 +98,6 @@ def is_relative_to(a: Path, b: Path) -> bool:
         return False
     else:
         return True
-
-
-def list_registry_tags(image_path: str) -> ty.List[str]:
-    """List all the tags for the given docker image reference within the registry
-
-    Parameters
-    ----------
-    image_path: str
-        the <registry>/<owner>/<image> path for the Docker image to find the tags for
-
-    Returns
-    -------
-    list[str]
-        the list of tags found in the registry
-    """
-    registry, owner, name = image_path.split("/")
-    url = f"https://{registry}/v2/{owner}/{name}/tags/list"
-    headers = {
-        "Accept": "application/vnd.github.v3+json",
-    }
-    response = requests.get(url, headers=headers)
-    if response.status_code != 200:
-        response.raise_for_status()
-    tags: ty.List[str] = response.json().get("tags", [])
-    return tags
 
 
 DOCKER_HUB = "docker.io"
