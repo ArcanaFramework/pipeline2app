@@ -101,21 +101,21 @@ def is_relative_to(a: Path, b: Path) -> bool:
         return True
 
 
-def list_docker_tags(image_reference: str) -> ty.List[str]:
-    """List all the tags for the given docker image reference
+def list_registry_tags(image_path: str) -> ty.List[str]:
+    """List all the tags for the given docker image reference within the registry
 
     Parameters
     ----------
-    image_reference: str
-        the reference for the Docker image to check
+    image_path: str
+        the <registry>/<owner>/<image> path for the Docker image to find the tags for
 
     Returns
     -------
     list[str]
         the list of tags found in the registry
     """
-    registry, image_path = image_reference.split("/", maxsplit=1)
-    url = f"https://{registry}/v2/{image_path}/tags/list"
+    registry, owner, name = image_path.split("/")
+    url = f"https://{registry}/v2/{owner}/{name}/tags/list"
     headers = {
         "Accept": "application/vnd.github.v3+json",
     }

@@ -23,7 +23,11 @@ import pipeline2app
 from pipeline2app.core import __version__
 from pipeline2app.core.image import Metapackage, App
 from pipeline2app.core.exceptions import Pipeline2appBuildError
-from pipeline2app.core.utils import extract_file_from_docker_image, DOCKER_HUB
+from pipeline2app.core.utils import (
+    extract_file_from_docker_image,
+    DOCKER_HUB,
+    list_registry_tags,
+)
 from pipeline2app.core.command import entrypoint_opts
 from pipeline2app.core import PACKAGE_NAME
 
@@ -358,6 +362,9 @@ def make(
         conflicting = {}
         to_build = []
         for image_spec in image_specs:
+
+            registry_tags = list_registry_tags(image_spec.path)
+            logger.info("Found the following tags in the registry: %s", registry_tags)
             try:
                 extracted_file = extract_file_from_docker_image(
                     image_spec.reference, image_spec.IN_DOCKER_SPEC_PATH
