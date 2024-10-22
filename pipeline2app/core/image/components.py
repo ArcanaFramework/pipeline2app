@@ -387,10 +387,11 @@ class NeurodockerTemplate:
 
     name: str
     version: str
+    optional_args: ty.Dict[str, ty.Any] = attrs.field(factory=dict)
 
 
 def python_package_converter(
-    packages: ty.List[ty.Union[str, dict]]
+    packages: ty.List[ty.Union[str, ty.Dict[str, ty.Any]]]
 ) -> ty.List[PipPackage]:
     """
     Split out and merge any extras specifications (e.g. "pipeline2app[test]")
@@ -402,6 +403,35 @@ def python_package_converter(
         ),
         remove_pipeline2app=True,
     )
+
+
+# def neurodocker_template_converter(
+#     templates: ty.List[ty.Union[str, ty.Dict[str, ty.Any]]]
+# ) -> ty.List[NeurodockerTemplate]:
+#         converted: ty.List[NeurodockerTemplate] = []
+#         if value is None:
+#             return converted
+#         if isinstance(value, dict):
+#             for name, item in value.items():
+#                 converted.append(self._create_object(item, name=name))
+#         else:
+#             for item in value:
+#                 converted.append(self._create_object(item))
+#         return converted
+
+#     @classmethod
+#     def asdict(cls, objs: ty.List[ty.Any], **kwargs: ty.Any) -> ty.Dict[str, ty.Any]:
+#         dct = {}
+#         for obj in objs:
+#             obj_dict = attrs.asdict(obj, **kwargs)
+#             dct[obj_dict.pop("name")] = obj_dict
+#         return dct
+
+#     @classmethod
+#     def aslist(cls, objs: ty.List[ty.Any], **kwargs: ty.Any) -> ty.List[ty.Any]:
+#         return [attrs.asdict(obj, **kwargs) for obj in objs]
+
+#     return ObjectListConverter(NeurodockerTemplate)(templates)
 
 
 @attrs.define

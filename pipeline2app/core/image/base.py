@@ -460,9 +460,9 @@ class P2AImage:
         """
         for template in self.packages.neurodocker:
             kwds = attrs.asdict(template)
-            kwds = copy(
-                kwds
-            )  # so we can pop the name and leave the original dictionary intact
+            # so we can pop the name and opt args and leave the original dictionary intact
+            kwds = copy(kwds)
+            kwds.update(kwds.pop("optional_args", {}))
             dockerfile.add_registered_template(kwds.pop("name"), **kwds)
 
     @classmethod
