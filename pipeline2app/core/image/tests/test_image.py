@@ -17,6 +17,7 @@ VERSIONS = [
     "1.0-alpha0",
     "1.0-alpha2",
     "1.0-beta0",
+    "1.0.0",
     "1.0-post1",
     "1.0-post2",
     "1.1-alpha",
@@ -70,9 +71,11 @@ def test_registry_tags(tmp_path: Path, registry: str, image_spec: ty.Dict[str, t
     token = os.environ.get(f"{registry_prefix}_TOKEN")
 
     dc = docker.from_env()
-    response = dc.login(username=username, password=token, registry=registry)
-    if response.status_code != 200:
-        response.raise_for_status()
+
+    if username is not None and token is not None:
+        response = dc.login(username=username, password=token, registry=registry)
+        if response["Status"] != "Login Succeeded":
+            logger.warning("Could not login to '%s':\n\n%s", registry, response)
 
     pushed = []
 
@@ -81,9 +84,9 @@ def test_registry_tags(tmp_path: Path, registry: str, image_spec: ty.Dict[str, t
 
         image_spec_cpy = copy(image_spec)
 
-        image_spec["version"] = version
+        image_spec_cpy["version"] = version
         if registry == DOCKER_HUB:
-            image_spec["org"] = "australianimagingservice"
+            image_spec_cpy["org"] = "australianimagingservice"
 
         image = App(registry=registry, **image_spec_cpy)
 
@@ -94,13 +97,17 @@ def test_registry_tags(tmp_path: Path, registry: str, image_spec: ty.Dict[str, t
                 image.make(build_dir=build_dir)
                 try:
                     dc.api.push(image.reference)
-                except Exception as e:
-                    raise RuntimeError(
+                except Exception:
+                    pytest.skip(
                         f"Could not push '{image.reference}':\n\n{format_exc()}"
-                    ) from e
+                    )
             else:
                 raise
-        pushed.append(image)
+        pushed.append(image.tag)
 
-    app = App(registry=registry, **image_spec)
-    assert sorted(app.registry_tags()) == sorted(pushed)
+    image_spec_cpy = copy(image_spec)
+    if registry == DOCKER_HUB:
+        image_spec_cpy["org"] = "australianimagingservice"
+
+    app = App(registry=registry, **image_spec_cpy)
+    assert sorted(app.registry_tags) == sorted(pushed)
