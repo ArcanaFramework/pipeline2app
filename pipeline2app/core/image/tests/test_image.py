@@ -20,7 +20,10 @@ VERSIONS = [
     "1.0.0",
     "1.0-post1",
     "1.0-post2",
-    "1.1-alpha",
+    "1.1-alpha0",
+    "1.2.0",
+    "1.11.0",
+    "1.12.1-rc1",
 ]
 
 
@@ -43,39 +46,29 @@ def image_spec(command_spec) -> ty.Dict[str, ty.Any]:
     }
 
 
-def test_sort_versions():
-
-    rng = random.Random(42)
-
-    shuffled = copy(VERSIONS)
-    rng.shuffle(shuffled)
-
-    sorted_versions = sorted(Version.parse(v) for v in shuffled)
-
-    assert sorted_versions == [Version.parse(v) for v in VERSIONS]
-    assert [str(v) for v in sorted_versions] == VERSIONS
-
-
 REQUIRED_ENVVARS = ("GHCR_USERNAME", "GHCR_TOKEN", "DOCKER_USERNAME", "DOCKER_TOKEN")
 
+REGISTRIES = [GITHUB_CONTAINER_REGISTRY, DOCKER_HUB]
 
-@pytest.mark.skipIf(
-    any(e not in os.environ for e in REQUIRED_ENVVARS),
-    reason=f"Not all required environment variables are set ({REQUIRED_ENVVARS})",
-)
-@pytest.mark.parametrize("registry", [GITHUB_CONTAINER_REGISTRY, DOCKER_HUB])
-def test_registry_tags(tmp_path: Path, registry: str, image_spec: ty.Dict[str, ty.Any]):
 
-    registry_prefix = registry.split(".")[0].upper()
+@pytest.fixture(params=REGISTRIES)
+def docker_registry(request: pytest.FixtureRequest) -> str:
+    return request.param
+
+
+@pytest.fixture
+def image_tags(image_spec, docker_registry, tmp_path) -> ty.List[str]:
+
+    registry_prefix = docker_registry.split(".")[0].upper()
     username = os.environ.get(f"{registry_prefix}_USERNAME")
     token = os.environ.get(f"{registry_prefix}_TOKEN")
 
     dc = docker.from_env()
 
     if username is not None and token is not None:
-        response = dc.login(username=username, password=token, registry=registry)
+        response = dc.login(username=username, password=token, registry=docker_registry)
         if response["Status"] != "Login Succeeded":
-            logger.warning("Could not login to '%s':\n\n%s", registry, response)
+            logger.warning("Could not login to '%s':\n\n%s", docker_registry, response)
 
     pushed = []
 
@@ -85,10 +78,10 @@ def test_registry_tags(tmp_path: Path, registry: str, image_spec: ty.Dict[str, t
         image_spec_cpy = copy(image_spec)
 
         image_spec_cpy["version"] = version
-        if registry == DOCKER_HUB:
+        if docker_registry == DOCKER_HUB:
             image_spec_cpy["org"] = "australianimagingservice"
 
-        image = App(registry=registry, **image_spec_cpy)
+        image = App(registry=docker_registry, **image_spec_cpy)
 
         try:
             dc.api.pull(image.reference)
@@ -105,9 +98,32 @@ def test_registry_tags(tmp_path: Path, registry: str, image_spec: ty.Dict[str, t
                 raise
         pushed.append(image.tag)
 
+    return sorted(pushed)
+
+
+def test_sort_versions():
+
+    rng = random.Random(42)
+
+    shuffled = copy(VERSIONS)
+    rng.shuffle(shuffled)
+
+    sorted_versions = sorted(Version.parse(v) for v in shuffled)
+
+    assert sorted_versions == [Version.parse(v) for v in VERSIONS]
+    assert [str(v) for v in sorted_versions] == VERSIONS
+
+
+def test_registry_tags(
+    image_tags: ty.List[str],
+    tmp_path: Path,
+    docker_registry: str,
+    image_spec: ty.Dict[str, ty.Any],
+) -> None:
+
     image_spec_cpy = copy(image_spec)
-    if registry == DOCKER_HUB:
+    if docker_registry == DOCKER_HUB:
         image_spec_cpy["org"] = "australianimagingservice"
 
-    app = App(registry=registry, **image_spec_cpy)
-    assert sorted(app.registry_tags) == sorted(pushed)
+    app = App(registry=docker_registry, **image_spec_cpy)
+    assert sorted(app.registry_tags) == sorted(image_tags)

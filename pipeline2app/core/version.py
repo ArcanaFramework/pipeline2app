@@ -1,5 +1,6 @@
 import typing as ty
 import re
+from itertools import zip_longest
 from typing_extensions import Self
 
 
@@ -42,17 +43,25 @@ class Version:
             isinstance(self.release, tuple) and isinstance(other.release, str)
         ):
             raise ValueError("Cannot compare versions with different release types")
-        if self.release < other.release:  # type: ignore[operator]
-            return -1
-        if self.release > other.release:  # type: ignore[operator]
-            return 1
+
+        if isinstance(self.release, tuple) and isinstance(other.release, tuple):
+            for s, o in zip_longest(self.release, other.release, fillvalue=0):
+                if s < o:
+                    return -1
+                if s > o:
+                    return 1
+        else:
+            if self.release < other.release:  # type: ignore[operator]
+                return -1
+            if self.release > other.release:  # type: ignore[operator]
+                return 1
         if self.suffix_label == "post" and other.suffix_label != "post":
             return 1
         if self.suffix_label != "post" and other.suffix_label == "post":
             return -1
-        if self.suffix_label and not other.suffix_label:
-            return 1
         if not self.suffix_label and other.suffix_label:
+            return 1
+        if self.suffix_label and not other.suffix_label:
             return -1
         if self.suffix_label:
             if not other.suffix_label:
@@ -130,7 +139,7 @@ class Version:
 
     version_re = re.compile(
         (
-            r"^v?(?P<release>[a-zA-Z0-9_]+)"
+            r"^v?(?P<release>[a-zA-Z0-9_\.]+)"
             r"(?P<suffix>-(?P<suffix_l>("
             + "|".join(SUFFIX_LABELS)
             + r"))(?P<suffix_n>[0-9]+)?)?$"
