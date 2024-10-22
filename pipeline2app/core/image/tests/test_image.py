@@ -2,6 +2,7 @@ import typing as ty
 from pathlib import Path
 import random
 import docker
+import os
 import logging
 from copy import copy
 from traceback import format_exc
@@ -54,26 +55,42 @@ def test_sort_versions():
     assert [str(v) for v in sorted_versions] == VERSIONS
 
 
+REQUIRED_ENVVARS = ("GHCR_USERNAME", "GHCR_TOKEN", "DOCKER_USERNAME", "DOCKER_TOKEN")
+
+
+@pytest.mark.skipIf(
+    any(e not in os.environ for e in REQUIRED_ENVVARS),
+    reason=f"Not all required environment variables are set ({REQUIRED_ENVVARS})",
+)
 @pytest.mark.parametrize("registry", [GITHUB_CONTAINER_REGISTRY, DOCKER_HUB])
 def test_registry_tags(tmp_path: Path, registry: str, image_spec: ty.Dict[str, ty.Any]):
 
+    registry_prefix = registry.split(".")[0].upper()
+    username = os.environ.get(f"{registry_prefix}_USERNAME")
+    token = os.environ.get(f"{registry_prefix}_TOKEN")
+
     dc = docker.from_env()
+    response = dc.login(username=username, password=token, registry=registry)
+    if response.status_code != 200:
+        response.raise_for_status()
 
     pushed = []
 
     for version in VERSIONS:
         build_dir = tmp_path / f"build-{version}"
 
+        image_spec_cpy = copy(image_spec)
+
         image_spec["version"] = version
         if registry == DOCKER_HUB:
             image_spec["org"] = "australianimagingservice"
 
-        image = App(registry=registry, **image_spec)
+        image = App(registry=registry, **image_spec_cpy)
 
         try:
             dc.api.pull(image.reference)
         except docker.errors.APIError as e:
-            if e.response.status_code == 500:
+            if e.response.status_code in (404, 500):
                 image.make(build_dir=build_dir)
                 try:
                     dc.api.push(image.reference)
@@ -84,3 +101,6 @@ def test_registry_tags(tmp_path: Path, registry: str, image_spec: ty.Dict[str, t
             else:
                 raise
         pushed.append(image)
+
+    app = App(registry=registry, **image_spec)
+    assert sorted(app.registry_tags()) == sorted(pushed)
