@@ -3,8 +3,9 @@ from pathlib import Path
 import random
 import docker
 import logging
+from copy import copy
 from traceback import format_exc
-from pipeline2app.core.image import P2AImage
+from pipeline2app.core.image import App
 from pipeline2app.core.version import Version
 from pipeline2app.core.utils import DOCKER_HUB, GITHUB_CONTAINER_REGISTRY
 import pytest
@@ -43,7 +44,9 @@ def image_spec(command_spec) -> ty.Dict[str, ty.Any]:
 def test_sort_versions():
 
     rng = random.Random(42)
-    shuffled = rng.shuffle(VERSIONS)
+
+    shuffled = copy(VERSIONS)
+    rng.shuffle(shuffled)
 
     sorted_versions = sorted(Version.parse(v) for v in shuffled)
 
@@ -62,13 +65,15 @@ def test_registry_tags(tmp_path: Path, registry: str, image_spec: ty.Dict[str, t
         build_dir = tmp_path / f"build-{version}"
 
         image_spec["version"] = version
+        if registry == DOCKER_HUB:
+            image_spec["org"] = "australianimagingservice"
 
-        image = P2AImage(registry=registry, **image_spec)
+        image = App(registry=registry, **image_spec)
 
         try:
             dc.api.pull(image.reference)
         except docker.errors.APIError as e:
-            if e.response.status_code == 404:
+            if e.response.status_code == 500:
                 image.make(build_dir=build_dir)
                 try:
                     dc.api.push(image.reference)
