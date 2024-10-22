@@ -23,7 +23,7 @@ from frametree.core.serialize import (
     ObjectListConverter,
 )
 from frametree.core.axes import Axes
-from pipeline2app.core.utils import DOCKER_HUB
+from pipeline2app.core.utils import DOCKER_HUB, GITHUB_CONTAINER_REGISTRY
 from pipeline2app.core.exceptions import Pipeline2appBuildError
 from .components import Packages, BaseImage, PipPackage, Resource
 
@@ -152,7 +152,7 @@ class P2AImage:
     def registry_tags(self) -> ty.List[str]:
         """List all the tags for the given docker image reference within the registry"""
         tags: ty.List[str]
-        if self.registry == "ghcr.io":
+        if self.registry == GITHUB_CONTAINER_REGISTRY:
             token_uri = f"https://{self.registry}/token?scope=repository:{self.org}/{self.name}:pull"
             response = requests.get(token_uri)
             if response.status_code != 200:
@@ -402,7 +402,7 @@ class P2AImage:
         dockerfile: DockerRenderer,
         build_dir: Path,
         use_local_packages: bool = False,
-        pipeline2app_install_extras: ty.Iterable = (),
+        pipeline2app_install_extras: ty.Sequence[str] = (),
         pypi_fallback: bool = False,
     ) -> None:
         """Generate Neurodocker instructions to install an appropriate version of
@@ -447,7 +447,7 @@ class P2AImage:
             pip_strs.append(self.pip_spec2str(pip_spec, dockerfile, build_dir))
 
         conda_pkg_names = set(p.name for p in self.packages.conda)
-        conda_strs = []
+        conda_strs: ty.List[str] = []
         # for pkg_name in CondaPackage.REQUIRED:
         #     if pkg_name not in conda_pkg_names:
         #         conda_strs.append(pkg_name)

@@ -101,3 +101,4 @@ def is_relative_to(a: Path, b: Path) -> bool:
 
 
 DOCKER_HUB = "docker.io"
+GITHUB_CONTAINER_REGISTRY = "ghcr.io"
