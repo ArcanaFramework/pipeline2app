@@ -54,16 +54,21 @@ class Version:
             return 1
         if not self.suffix_label and other.suffix_label:
             return -1
-        label_index = self.SUFFIX_LABELS.index(self.suffix_label)
-        other_label_index = self.SUFFIX_LABELS.index(other.suffix_label)
-        if label_index < other_label_index:
+        if self.suffix_label:
+            if not other.suffix_label:
+                return 1
+            label_index = self.SUFFIX_LABELS.index(self.suffix_label)
+            other_label_index = self.SUFFIX_LABELS.index(other.suffix_label)
+            if label_index < other_label_index:
+                return -1
+            if label_index > other_label_index:
+                return 1
+            if self.suffix_number < other.suffix_number:
+                return -1
+            if self.suffix_number > other.suffix_number:
+                return 1
+        elif other.suffix_label:
             return -1
-        if label_index > other_label_index:
-            return 1
-        if self.suffix_number < other.suffix_number:
-            return -1
-        if self.suffix_number > other.suffix_number:
-            return 1
         return 0
 
     def __str__(self) -> str:
@@ -90,6 +95,8 @@ class Version:
                 return False
         elif not isinstance(other, Version):
             return False
+        else:
+            other_version = other
         return self.compare(other_version) == 0
 
     def __ne__(self, other: object) -> bool:
