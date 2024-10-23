@@ -155,7 +155,6 @@ class P2AImage:
                 ),
                 no_cache=no_cache,
                 stream_output=stream_output,
-                reference=reference,
             )
 
     def registry_tags(self) -> ty.List[str]:
@@ -336,7 +335,6 @@ class P2AImage:
         image_reference: str,
         no_cache: bool = False,
         stream_output: ty.Optional[bool] = None,
-        reference: ty.Optional[str] = None,
     ) -> str:
         """Builds the dockerfile in the specified build directory
 

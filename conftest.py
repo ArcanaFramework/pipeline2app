@@ -311,4 +311,7 @@ def local_docker_registry() -> ty.Generator[str, None, None]:
         )
 
     yield f"localhost:{PORT}"
-    container.stop()
+    try:
+        container.stop()
+    except Exception:
+        logger.warning("Failed to stop docker registry container")

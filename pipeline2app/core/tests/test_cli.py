@@ -143,19 +143,12 @@ def test_deploy_remake_cli(command_spec, local_docker_registry, cli_runner, run_
         # is a clash)
         concatenate_spec["packages"] = {"system": ["vim", "git"]}
 
-        with pytest.raises(Pipeline2appBuildError) as excinfo:
-            build_spec(concatenate_spec, catch_exceptions=False)
+        result = build_spec(concatenate_spec, catch_exceptions=False)
 
-        assert "doesn't match the one that was used to build the image" in str(
-            excinfo.value
-        )
-
-        # Increment the build number to avoid the clash
-        concatenate_spec["version"]["build"] = "2"
-
-        result = build_spec(concatenate_spec)
+        # Check that the image was rebuilt with an incremented tag
         assert result.exit_code == 0, show_cli_trace(result)
         rebuilt_tag = result.output.strip().splitlines()[-1]
+        assert rebuilt_tag.split(":")[-1] == "1.0-post1"
         dc.images.remove(rebuilt_tag)
     finally:
         # Clean up the built images
