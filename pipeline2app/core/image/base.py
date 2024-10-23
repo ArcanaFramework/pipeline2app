@@ -1,6 +1,6 @@
 from __future__ import annotations
 import typing as ty
-from pathlib import PurePath, Path
+from pathlib import PurePath, Path, PosixPath
 import json
 import re
 import tempfile
@@ -13,7 +13,10 @@ import shutil
 from inspect import isclass, isfunction
 from build import ProjectBuilder
 import attrs
+import yaml
 import docker.errors
+from deepdiff import DeepDiff
+from typing_extensions import Self
 from neurodocker.reproenv import DockerRenderer
 from pipeline2app.core import __version__
 from pipeline2app.core import PACKAGE_NAME
@@ -23,14 +26,18 @@ from frametree.core.serialize import (
     ObjectListConverter,
 )
 from frametree.core.axes import Axes
-from pipeline2app.core.utils import DOCKER_HUB, GITHUB_CONTAINER_REGISTRY
+from pipeline2app.core.utils import (
+    DOCKER_HUB,
+    GITHUB_CONTAINER_REGISTRY,
+    extract_file_from_docker_image,
+)
 from pipeline2app.core.exceptions import Pipeline2appBuildError
-from .components import Packages, BaseImage, PipPackage, Resource
+from .components import Packages, BaseImage, PipPackage, Resource, Version
 
 logger = logging.getLogger("pipeline2app")
 
 
-@attrs.define(kw_only=True)
+@attrs.define(kw_only=True, auto_attribs=False)
 class P2AImage:
     """
     Base class with Pipeline2app installed within it from which all container image
@@ -38,7 +45,7 @@ class P2AImage:
 
     name : str
         name of the package/pipeline
-    version : str
+    version : Version
         version of the package/pipeline
     org : str
         the organisation the image will be tagged within
@@ -58,27 +65,30 @@ class P2AImage:
     """
 
     IN_DOCKER_FRAMETREE_HOME_DIR = "/frametree-home"
+    IN_DOCKER_SPEC_PATH = "/pipeline2app-spec.yaml"
     SCHEMA_VERSION = "1.0"
-    PIP_DEPENDENCIES = ()
+    PIP_DEPENDENCIES: ty.Tuple[str, ...] = ()
 
-    name: str
-    version: str
+    name: str = attrs.field()
+    version: Version = attrs.field(
+        converter=Version.parse, metadata={"serializer": Version.tostr}  # type: ignore[misc]
+    )
     base_image: BaseImage = attrs.field(
-        default=BaseImage(), converter=ObjectConverter(BaseImage)
+        default=BaseImage(), converter=ObjectConverter(BaseImage)  # type: ignore[misc]
     )
     packages: Packages = attrs.field(
-        default=Packages(), converter=ObjectConverter(Packages)
+        default=Packages(), converter=ObjectConverter(Packages)  # type: ignore[misc]
     )
     resources: ty.List[Resource] = attrs.field(
         factory=list,
-        converter=ObjectListConverter(Resource),
+        converter=ObjectListConverter(Resource),  # type: ignore[misc]
         metadata={"serializer": ObjectListConverter.asdict},
     )
-    org: ty.Optional[str] = None
-    registry: str = DOCKER_HUB
-    readme: ty.Optional[str] = None
-    labels: ty.Optional[ty.Dict[str, str]] = None
-    schema_version: str = SCHEMA_VERSION
+    org: ty.Optional[str] = attrs.field(default=None)
+    registry: str = attrs.field(default=DOCKER_HUB)
+    readme: ty.Optional[str] = attrs.field(default=None)
+    labels: ty.Optional[ty.Dict[str, str]] = attrs.field(default=None)
+    schema_version: str = attrs.field(default=SCHEMA_VERSION)
 
     @property
     def reference(self) -> str:
@@ -148,14 +158,27 @@ class P2AImage:
                 reference=reference,
             )
 
-    @cached_property
     def registry_tags(self) -> ty.List[str]:
         """List all the tags for the given docker image reference within the registry"""
         tags: ty.List[str]
-        if self.registry == GITHUB_CONTAINER_REGISTRY:
+        if self.registry == DOCKER_HUB:
+            url = f"https://hub.docker.com/v2/repositories/{self.org}/{self.name}/tags/"
+            tags = []
+            while url:
+                response = requests.get(url)
+                if response.status_code == 404:
+                    return []
+                elif response.status_code != 200:
+                    response.raise_for_status()
+                data = response.json()
+                tags.extend(tag["name"] for tag in data["results"])
+                url = data["next"]  # Get the URL for the next page of results
+        elif self.registry == GITHUB_CONTAINER_REGISTRY:
             token_uri = f"https://{self.registry}/token?scope=repository:{self.org}/{self.name}:pull"
             response = requests.get(token_uri)
-            if response.status_code != 200:
+            if response.status_code == 404:
+                return []
+            elif response.status_code != 200:
                 response.raise_for_status()
             registry_token = response.json().get("token")
             url = f"https://{self.registry}/v2/{self.org}/{self.name}/tags/list"
@@ -167,21 +190,61 @@ class P2AImage:
             if response.status_code != 200:
                 response.raise_for_status()
             tags = response.json().get("tags", [])
-        elif self.registry == DOCKER_HUB:
-            url = f"https://hub.docker.com/v2/repositories/{self.org}/{self.name}/tags/"
-            tags = []
-            while url:
-                response = requests.get(url)
-                if response.status_code != 200:
-                    response.raise_for_status()
-                data = response.json()
-                tags.extend(tag["name"] for tag in data["results"])
-                url = data["next"]  # Get the URL for the next page of results
         else:
-            raise NotImplementedError(
-                f"Registry '{self.registry}' not supported for listing tags yet"
-            )
+            protocol = "http" if self.registry.startswith("localhost") else "https"
+            url = f"{protocol}://{self.registry}/v2/{self.org}/{self.name}/tags/list"
+            response = requests.get(url)
+            if response.status_code == 404:
+                return []
+            elif response.status_code != 200:
+                response.raise_for_status()
+            tags = response.json().get("tags", [])
         return tags
+
+    @cached_property
+    def latest_published(self) -> ty.Optional[Version]:
+        """Get the latest published version of the image from the registry"""
+        published_tags = self.registry_tags()
+        logger.info(
+            "Found the following versions in the registry for '%s': %s",
+            self.path,
+            published_tags,
+        )
+        versions = sorted(Version.parse(t) for t in published_tags)
+        return versions[-1] if versions else None
+
+    def matches_image(self, image_reference: str) -> bool:
+        """Check if the specifications of two images match"""
+        try:
+            extracted_specs_file = extract_file_from_docker_image(
+                image_reference, PosixPath(self.IN_DOCKER_SPEC_PATH)
+            )
+        except docker.errors.NotFound:
+            extracted_specs_file = None
+        if extracted_specs_file is None:
+            logger.warning(
+                "Could not extract spec from existing image '%s' to check for changes "
+                "assuming it is different",
+                image_reference,
+            )
+            return False
+        logger.info(
+            "Comparing build spec with that of existing image %s",
+            image_reference,
+        )
+        built_spec = self.load(extracted_specs_file)
+
+        changelog = self.compare_specs(built_spec, check_versions=False)
+
+        if changelog:
+            logger.debug(
+                "'%s' differs from existing image '%s':\n%s",
+                self.reference,
+                image_reference,
+                changelog,
+            )
+            return False
+        return True
 
     def construct_dockerfile(
         self,
@@ -254,6 +317,8 @@ class P2AImage:
         self.write_readme(dockerfile, build_dir)
 
         self.add_labels(dockerfile)
+
+        self.insert_spec(dockerfile, build_dir)
 
         # Create writable directories
         for dpath in (self.IN_DOCKER_FRAMETREE_HOME_DIR, "/.cache"):
@@ -344,6 +409,80 @@ class P2AImage:
             self.base_image.reference
         )
         return dockerfile
+
+    def save(self, yml_path: Path) -> None:
+        """Saves the specification to a YAML file that can be loaded again
+
+        Parameters
+        ----------
+        yml_path : Path
+            path to file to save the spec to
+        """
+        yml_dct = self.asdict()
+        yml_dct["type"] = ClassResolver.tostr(self, strip_prefix=False)
+        with open(yml_path, "w") as f:
+            yaml.dump(yml_dct, f)
+
+    def insert_spec(self, dockerfile: DockerRenderer, build_dir: Path) -> None:
+        """Generate Neurodocker instructions to save the specification inside the built
+        image to be used when running the command and comparing against future builds
+
+        Parameters
+        ----------
+        dockerfile : DockerRenderer
+            the neurodocker renderer to append the install instructions to
+        spec : dict
+            the specification used to build the image
+        build_dir : Path
+            path to build dir
+        """
+        self.save(build_dir / "pipeline2app-spec.yaml")
+        dockerfile.copy(
+            source=["./pipeline2app-spec.yaml"], destination=self.IN_DOCKER_SPEC_PATH
+        )
+
+    @classmethod
+    def load(
+        cls,
+        yml: ty.Union[Path, ty.Dict[str, ty.Any]],
+        name: ty.Optional[str] = None,
+        **kwargs: ty.Any,
+    ) -> Self:
+        """Loads a deploy-build specification from a YAML file
+
+        Parameters
+        ----------
+        yml : Path or dict
+            path to the YAML file to load or loaded dictionary
+        name: str, optional
+            name of the pipeline, by default None
+
+        Returns
+        -------
+        Self
+            The loaded spec object
+        """
+
+        if isinstance(yml, str):
+            yml = Path(yml)
+        if isinstance(yml, Path):
+            yml_dict = cls._load_yaml(yml)
+            if not isinstance(yml_dict, dict):
+                raise ValueError(f"{yml!r} didn't contain a dict!")
+            if name is None:
+                name = yml.stem
+            yml_dict["loaded_from"] = yml.absolute()
+        else:
+            yml_dict = yml
+        if yml_dict.get("name") is None:
+            yml_dict["name"] = name
+
+        yml_dict.pop("type", None)  # Remove "type" from dict if present
+
+        # Override/augment loaded values from spec
+        yml_dict.update(kwargs)
+
+        return cls(**yml_dict)
 
     def add_resources(
         self,
@@ -676,6 +815,56 @@ class P2AImage:
         if not self.base_image.conda_env:
             return []
         return ["conda", "run", "--no-capture-output", "-n", self.base_image.conda_env]
+
+    def compare_specs(self, other: Self, check_versions: bool = True) -> DeepDiff:
+        """Compares two build specs against each other and returns the difference
+
+        Parameters
+        ----------
+        s1 : dict
+            first spec
+        s2 : dict
+            second spec
+        check_version : bool
+            check the pipeline2app version used to generate the specs
+
+        Returns
+        -------
+        DeepDiff
+            the difference between the specs
+        """
+
+        sdict = self.asdict()
+        odict = other.asdict()
+
+        def prep(s: ty.Dict[str, ty.Any]) -> ty.Dict[str, ty.Any]:
+            dct = {
+                k: v
+                for k, v in s.items()
+                if (not k.startswith("_") and (v or isinstance(v, bool)))
+            }
+            if check_versions:
+                if "pipeline2app_version" not in dct:
+                    dct["pipeline2app_version"] = __version__
+            else:
+                del dct["pipeline2app_version"]
+                del dct["version"]
+            return dct
+
+        diff = DeepDiff(prep(sdict), prep(odict), ignore_order=True)
+        return diff
+
+    @classmethod
+    def _load_yaml(cls, yaml_file: ty.Union[Path, str]) -> ty.Dict[str, ty.Any]:
+        def yaml_join(loader: yaml.Loader, node: yaml.SequenceNode) -> str:
+            seq = loader.construct_sequence(node)
+            return "".join([str(i) for i in seq])
+
+        # Add special constructors to handle joins and concatenations within the YAML
+        yaml.SafeLoader.add_constructor(tag="!join", constructor=yaml_join)
+        with open(yaml_file, "r") as f:
+            dct = yaml.load(f, Loader=yaml.SafeLoader)
+        return dct  # type: ignore[no-any-return]
 
     DOCKERFILE_README_TEMPLATE = """
         The following Docker image was generated by Pipeline2app v{} (https://pipeline2app.readthedocs.io)

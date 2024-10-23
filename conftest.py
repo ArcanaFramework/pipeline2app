@@ -287,7 +287,7 @@ def command_spec() -> ty.Dict[str, ty.Any]:
 
 
 @pytest.fixture(scope="session")
-def docker_registry() -> ty.Generator[str, None, None]:
+def local_docker_registry() -> ty.Generator[str, None, None]:
 
     IMAGE = "docker.io/registry"
     PORT = "5557"

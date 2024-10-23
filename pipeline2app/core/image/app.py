@@ -8,7 +8,6 @@ import shutil
 import attrs
 import yaml
 import toml
-from deepdiff import DeepDiff
 from neurodocker.reproenv import DockerRenderer
 from pipeline2app.core import __version__
 from frametree.core.serialize import (
@@ -62,23 +61,21 @@ class App(P2AImage):
         the file the spec was loaded from, if applicable
     """
 
-    IN_DOCKER_SPEC_PATH = "/pipeline2app-spec.yaml"
-
     SUBPACKAGE = "deploy"
 
     title: str
     authors: ty.List[ContainerAuthor] = attrs.field(
-        converter=ObjectListConverter(ContainerAuthor),
+        converter=ObjectListConverter(ContainerAuthor),  # type: ignore[misc]
         metadata={"serializer": ObjectListConverter.asdict},
     )
     licenses: ty.List[License] = attrs.field(
         factory=dict,
-        converter=ObjectListConverter(License),
+        converter=ObjectListConverter(License),  # type: ignore[misc]
         metadata={"serializer": ObjectListConverter.asdict},
     )
-    docs: Docs = attrs.field(converter=ObjectConverter(Docs))
+    docs: Docs = attrs.field(converter=ObjectConverter(Docs))  # type: ignore[misc]
     commands: ty.List[ContainerCommand] = attrs.field(
-        converter=ObjectListConverter(ContainerCommand)
+        converter=ObjectListConverter(ContainerCommand)  # type: ignore[misc]
     )
     loaded_from: Path = attrs.field(default=None, metadata={"asdict": False})
     pipeline2app_version: str = __version__
@@ -153,8 +150,6 @@ class App(P2AImage):
             build_dir,
         )
 
-        self.insert_spec(dockerfile, build_dir)
-
         self.add_entrypoint(dockerfile, build_dir)
 
         return dockerfile
@@ -192,42 +187,11 @@ class App(P2AImage):
                         "from '%s' dataset-level column or site-wide license dataset at "
                         "runtime",
                         lic.name,
-                        lic.column_name(lic.name),
+                        lic.column_path(lic.name),
                     )
 
-    def insert_spec(self, dockerfile: DockerRenderer, build_dir: Path) -> None:
-        """Generate Neurodocker instructions to save the specification inside the built
-        image to be used when running the command and comparing against future builds
-
-        Parameters
-        ----------
-        dockerfile : DockerRenderer
-            the neurodocker renderer to append the install instructions to
-        spec : dict
-            the specification used to build the image
-        build_dir : Path
-            path to build dir
-        """
-        self.save(build_dir / "pipeline2app-spec.yaml")
-        dockerfile.copy(
-            source=["./pipeline2app-spec.yaml"], destination=self.IN_DOCKER_SPEC_PATH
-        )
-
-    def save(self, yml_path: Path) -> None:
-        """Saves the specification to a YAML file that can be loaded again
-
-        Parameters
-        ----------
-        yml_path : Path
-            path to file to save the spec to
-        """
-        yml_dct = self.asdict()
-        yml_dct["type"] = ClassResolver.tostr(self, strip_prefix=False)
-        with open(yml_path, "w") as f:
-            yaml.dump(yml_dct, f)
-
     @classmethod
-    def load(
+    def load(  # type: ignore[override]
         cls,
         yml: ty.Union[Path, ty.Dict[str, ty.Any]],
         root_dir: ty.Optional[Path] = None,
@@ -236,7 +200,7 @@ class App(P2AImage):
         default_axes: ty.Optional[ty.Type[Axes]] = None,
         source_packages: ty.Sequence[Path] = (),
         **kwargs: ty.Any,
-    ) -> "Self":
+    ) -> Self:
         """Loads a deploy-build specification from a YAML file
 
         Parameters
@@ -325,7 +289,7 @@ class App(P2AImage):
                 if pip_pkg.name == package_name:
                     new_pip_pkg = PipPackage(
                         name=package_name,
-                        file_path=source_package,
+                        file_path=str(source_package),
                         extras=pip_pkg.extras,
                     )
                     image.packages.pip.remove(pip_pkg)
@@ -341,7 +305,7 @@ class App(P2AImage):
 
         if license_paths is not None:
             for lic in image.licenses:
-                if lic.name in licenses_to_download:
+                if licenses_to_download and lic.name in licenses_to_download:
                     lic.store_in_image = False
                 if lic.store_in_image:
                     try:
@@ -353,18 +317,6 @@ class App(P2AImage):
                         )
 
         return image
-
-    @classmethod
-    def _load_yaml(cls, yaml_file: ty.Union[Path, str]) -> ty.Dict[str, ty.Any]:
-        def yaml_join(loader: yaml.Loader, node: yaml.SequenceNode) -> str:
-            seq = loader.construct_sequence(node)
-            return "".join([str(i) for i in seq])
-
-        # Add special constructors to handle joins and concatenations within the YAML
-        yaml.SafeLoader.add_constructor(tag="!join", constructor=yaml_join)
-        with open(yaml_file, "r") as f:
-            dct = yaml.load(f, Loader=yaml.SafeLoader)
-        return dct  # type: ignore[no-any-return]
 
     @classmethod
     def load_tree(
@@ -404,6 +356,11 @@ class App(P2AImage):
             "weight": 10,
         }
 
+        if self.org is None:
+            raise ValueError(
+                f"Organisation must be defined to generate documentation from App spec: {self}"
+            )
+
         if self.loaded_from:
             header["source_file"] = str(self.loaded_from)
 
@@ -427,8 +384,7 @@ class App(P2AImage):
             tbl_info = MarkdownTable(f, "Key", "Value")
             tbl_info.write_row("Name", self.name)
             tbl_info.write_row("Title", self.title)
-            tbl_info.write_row("Package version", self.version.package)
-            tbl_info.write_row("Build", self.version.build_info())
+            tbl_info.write_row("Version", str(self.version))
             tbl_info.write_row("Base image", escaped_md(self.base_image.reference))
             tbl_info.write_row(
                 "Maintainer", f"{self.authors[0].name} ({self.authors[0].email})"
@@ -436,7 +392,14 @@ class App(P2AImage):
             tbl_info.write_row("Info URL", self.docs.info_url)
 
             for known_issue in self.docs.known_issues:
-                tbl_info.write_row("Known issues", known_issue.url)
+                tbl_info.write_row(
+                    "Known issues",
+                    (
+                        known_issue.description + f" ({known_issue.url})"
+                        if known_issue.url
+                        else ""
+                    ),
+                )
 
             desc = self.docs.description or self.title
             f.write(f"\n{desc}\n\n")
@@ -518,43 +481,6 @@ class App(P2AImage):
                         )
                     f.write("\n")
 
-    def compare_specs(self, other: "App", check_version: bool = True) -> DeepDiff:
-        """Compares two build specs against each other and returns the difference
-
-        Parameters
-        ----------
-        s1 : dict
-            first spec
-        s2 : dict
-            second spec
-        check_version : bool
-            check the pipeline2app version used to generate the specs
-
-        Returns
-        -------
-        DeepDiff
-            the difference between the specs
-        """
-
-        sdict = self.asdict()
-        odict = other.asdict()
-
-        def prep(s: ty.Dict[str, ty.Any]) -> ty.Dict[str, ty.Any]:
-            dct = {
-                k: v
-                for k, v in s.items()
-                if (not k.startswith("_") and (v or isinstance(v, bool)))
-            }
-            if check_version:
-                if "pipeline2app_version" not in dct:
-                    dct["pipeline2app_version"] = __version__
-            else:
-                del dct["pipeline2app_version"]
-            return dct
-
-        diff = DeepDiff(prep(sdict), prep(odict), ignore_order=True)
-        return diff
-
     # @classmethod
     # def load_in_image(cls, spec_path: Path = IN_DOCKER_SPEC_PATH):
     #     yml_dct = cls._load_yaml(spec_path)
@@ -582,7 +508,7 @@ class App(P2AImage):
 
 
 class MarkdownTable:
-    def __init__(self, f, *headers: str) -> None:
+    def __init__(self, f: ty.IO[str], *headers: str) -> None:
         self.headers = tuple(headers)
 
         self.f = f
@@ -592,8 +518,8 @@ class MarkdownTable:
         self.write_row(*self.headers)
         self.write_row(*("-" * len(x) for x in self.headers))
 
-    def write_row(self, *cols: str) -> None:
-        cols = list(cols)
+    def write_row(self, *cols_tple: str) -> None:
+        cols = list(cols_tple)
         if len(cols) > len(self.headers):
             raise ValueError(
                 f"More entries in row ({len(cols)} than columns ({len(self.headers)})"

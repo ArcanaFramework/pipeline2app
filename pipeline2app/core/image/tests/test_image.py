@@ -7,7 +7,7 @@ import logging
 from copy import copy
 from traceback import format_exc
 from pipeline2app.core.image import App
-from pipeline2app.core.version import Version
+from pipeline2app.core.image.components import Version
 from pipeline2app.core.utils import DOCKER_HUB, GITHUB_CONTAINER_REGISTRY
 import pytest
 
@@ -48,12 +48,12 @@ def image_spec(command_spec) -> ty.Dict[str, ty.Any]:
 
 REQUIRED_ENVVARS = ("GHCR_USERNAME", "GHCR_TOKEN", "DOCKER_USERNAME", "DOCKER_TOKEN")
 
-REGISTRIES = [GITHUB_CONTAINER_REGISTRY, DOCKER_HUB]
+REGISTRIES = [GITHUB_CONTAINER_REGISTRY, DOCKER_HUB, "localhost"]
 
 
 @pytest.fixture(params=REGISTRIES)
-def docker_registry(request: pytest.FixtureRequest) -> str:
-    return request.param
+def docker_registry(request: pytest.FixtureRequest, local_docker_registry: str) -> str:
+    return request.param if request.param != "localhost" else local_docker_registry
 
 
 @pytest.fixture
@@ -114,6 +114,14 @@ def test_sort_versions():
     assert [str(v) for v in sorted_versions] == VERSIONS
 
 
+UNKNOWN_VERSIONS = ["1.0.0-unknown0", "1.0.0-alpha0junk"]
+
+
+@pytest.mark.parametrize("version", UNKNOWN_VERSIONS)
+def test_bad_version(version):
+    Version.parse(version).release = version
+
+
 def test_registry_tags(
     image_tags: ty.List[str],
     tmp_path: Path,
@@ -126,4 +134,4 @@ def test_registry_tags(
         image_spec_cpy["org"] = "australianimagingservice"
 
     app = App(registry=docker_registry, **image_spec_cpy)
-    assert sorted(app.registry_tags) == sorted(image_tags)
+    assert sorted(app.registry_tags()) == sorted(image_tags)

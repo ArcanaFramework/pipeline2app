@@ -1,7 +1,7 @@
 import sys
 import logging
 import shutil
-from pathlib import Path, PosixPath
+from pathlib import Path
 import json
 import typing as ty
 import re
@@ -23,12 +23,10 @@ import pipeline2app
 from pipeline2app.core import __version__
 from pipeline2app.core.image import Metapackage, App
 from pipeline2app.core.utils import (
-    extract_file_from_docker_image,
     DOCKER_HUB,
 )
 from pipeline2app.core.command import entrypoint_opts
 from pipeline2app.core import PACKAGE_NAME
-from .version import Version
 
 
 logger = logging.getLogger("pipeline2app")
@@ -110,6 +108,7 @@ containing multiple specifications
 )
 @click.option(
     "--install-extras",
+    "install_extras_str",
     type=str,
     default=None,
     help=(
@@ -259,7 +258,7 @@ def make(
     loglevel: str,
     build_dir: Path,
     use_local_packages: bool,
-    install_extras: str,
+    install_extras_str: str,
     raise_errors: bool,
     generate_only: bool,
     for_localhost: bool,
@@ -285,8 +284,8 @@ def make(
         build_dir = Path(build_dir.decode("utf-8"))
 
     resources: ty.List[ty.Tuple[str, Path]] = []
-    for rname, rpath in resource:
-        rpath = Path(rpath)
+    for rname, rpath_str in resource:
+        rpath = Path(rpath_str)
         if not rpath.exists():
             raise ValueError(
                 f"Resource path {str(rpath)!r} provided to {rname!r} does not exist"
@@ -327,7 +326,9 @@ def make(
     if not build_dir.exists():
         build_dir.mkdir()
 
-    install_extras = install_extras.split(",") if install_extras else []
+    install_extras: ty.List[str] = (
+        install_extras_str.split(",") if install_extras_str else []
+    )
 
     logging.basicConfig(filename=logfile, level=getattr(logging, loglevel.upper()))
 
@@ -362,7 +363,7 @@ def make(
     # already exists and b) whether it was built with the same specs
 
     errors = False
-    conflicting = {}
+    manifest: ty.Dict[str, ty.Any] = {}
     if release or save_manifest:
         manifest = {
             "package": package_name,
@@ -373,49 +374,22 @@ def make(
 
     for image_spec in image_specs:
         image_reference = image_spec.reference
-        if check_registry:
-
-            logger.info(
-                "Found the following tags in the registry to check against: %s",
-                image_spec.registry_tags,
+        if (
+            check_registry
+            and image_spec.latest_published
+            and image_spec.latest_published >= image_spec.version
+        ):
+            latest_reference = f"{image_spec.path}:{image_spec.latest_published}"
+            if image_spec.matches_image(latest_reference):
+                logger.info(
+                    "Skipping '%s' build as identical image already exists in registry '%s'",
+                    image_reference,
+                    latest_reference,
+                )
+                continue
+            image_reference = (
+                f"{image_spec.path}:{image_spec.latest_published.bump_postfix()}"
             )
-            registry_versions = sorted(
-                Version.parse(t) for t in image_spec.registry_tags
-            )
-            latest_version = registry_versions[-1] if registry_versions else None
-            image_version = Version.parse(image_spec.version)
-            if latest_version and latest_version >= image_version:
-                latest_reference = f"{image_spec.path}:{latest_version}"
-                try:
-                    extracted_file = extract_file_from_docker_image(
-                        latest_reference, PosixPath(image_spec.IN_DOCKER_SPEC_PATH)
-                    )
-                except docker.errors.NotFound:
-                    extracted_file = None
-                if extracted_file is None:
-                    logger.warning(
-                        "Could not extract spec from existing image '%s' to check for changes "
-                        "assuming it is different",
-                        latest_reference,
-                    )
-                    changelog = None
-                else:
-                    logger.info(
-                        "Comparing build spec with that of existing image %s",
-                        latest_reference,
-                    )
-                    built_spec = image_spec.load(extracted_file)
-
-                    changelog = image_spec.compare_specs(built_spec, check_version=True)
-
-                    if not changelog:
-                        logger.info(
-                            "Skipping '%s' build as identical image already "
-                            "exists in registry"
-                        )
-                        continue
-                    conflicting[image_spec.reference] = (latest_reference, changelog)
-                image_reference = f"{image_spec.path}:{latest_version.bump_postfix()}"
 
         spec_build_dir = (
             build_dir / image_spec.loaded_from.relative_to(spec_path.absolute())
@@ -431,6 +405,7 @@ def make(
                 generate_only=generate_only,
                 resources=resources,
                 resources_dir=resources_dir,
+                pipeline2app_install_extras=install_extras,
                 no_cache=clean_up,
                 stream_logs=stream_logs,
                 reference=image_reference,
@@ -658,7 +633,7 @@ specified workflows and return them and their versions""",
 )
 @click.argument("task_locations", nargs=-1)
 def required_packages(task_locations: ty.List[str]) -> None:
-    required_modules = set()
+    required_modules: ty.Set[str] = set()
     for task_location in task_locations:
         workflow = ClassResolver(
             TaskBase, alternative_types=[ty.Callable], package=PACKAGE_NAME
@@ -925,9 +900,9 @@ def bootstrap(
     version: str,
     description: str,
     command_task: str,
-    packages_pip: ty.List[ty.Tuple[str, str]],
-    packages_system: ty.List[ty.Tuple[str, str]],
-    packages_neurodocker: ty.List[ty.Tuple[str, str]],
+    packages_pip: ty.List[str],
+    packages_system: ty.List[str],
+    packages_neurodocker: ty.List[str],
     command_inputs: ty.List[ty.Tuple[str, str, str]],
     command_outputs: ty.List[ty.Tuple[str, str, str]],
     command_parameters: ty.List[ty.Tuple[str, str, str]],
@@ -941,7 +916,7 @@ def bootstrap(
     Path(output_file).parent.mkdir(parents=True, exist_ok=True)
 
     def unwrap_fields(
-        fields: ty.List[ty.Tuple[str, str, str]]
+        fields: ty.List[ty.Tuple[str, str]]
     ) -> ty.Dict[str, ty.Dict[str, ty.Any]]:
         fields_dict = {}
         for field_name, attrs_str in fields:
@@ -971,17 +946,14 @@ def bootstrap(
 
     def split_versions(packages: ty.List[str]) -> ty.Dict[str, ty.Optional[str]]:
         return dict(
-            ver_split_re.split(p, maxsplit=1) if "=" in p else [p, None]
+            tuple(ver_split_re.split(p, maxsplit=1)) if "=" in p else (p, None)  # type: ignore[misc]
             for p in packages
         )
 
     spec = {
         "schema_version": App.SCHEMA_VERSION,
         "title": title,
-        "version": {
-            "package": version,
-            "build": 1,
-        },
+        "version": version,
         "registry": registry,
         "docs": {
             "description": description,
