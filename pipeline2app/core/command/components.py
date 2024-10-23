@@ -30,9 +30,9 @@ class ColumnDefaults:
         path to where the data will be placed in the repository
     """
 
-    datatype: type = attrs.field(
+    datatype: ty.Type[DataType] = attrs.field(
         default=None,
-        converter=ClassResolver(
+        converter=ClassResolver(  # type: ignore[misc]
             DataType,
             allow_none=True,
             alternative_types=[DataRow],
@@ -67,7 +67,7 @@ class CommandField(PipelineField):
     configuration: ty.Union[ty.Dict[str, ty.Any], bool] = attrs.field(factory=dict)
 
     @property
-    def config_dict(self):
+    def config_dict(self) -> ty.Dict[str, ty.Any]:
         """Returns a dictionary to be passed to the task/workflow in order to configure
         it to receive input/output
 
@@ -122,7 +122,7 @@ class CommandInput(CommandField):
     )
 
     @column_defaults.validator
-    def column_validator(self, _, column: ColumnDefaults):
+    def column_validator(self, _: ty.Any, column: ColumnDefaults) -> None:
         if (
             column.datatype is not None
             and self.datatype is not column.datatype
@@ -139,7 +139,7 @@ class CommandInput(CommandField):
                 )
                 raise
 
-    def __attrs_post_init__(self):
+    def __attrs_post_init__(self) -> None:
         if self.column_defaults.datatype is None:
             self.column_defaults.datatype = self.datatype
 
@@ -169,14 +169,16 @@ class CommandOutput(CommandField):
     """
 
     column_defaults: ColumnDefaults = attrs.field(
-        converter=ObjectConverter(
+        converter=ObjectConverter(  # type: ignore[misc]
             ColumnDefaults, allow_none=True, default_if_none=ColumnDefaults
         ),
         default=None,
     )
 
     @column_defaults.validator
-    def column_defaults_validator(self, _, column_defaults: ColumnDefaults):
+    def column_defaults_validator(
+        self, _: ty.Any, column_defaults: ColumnDefaults
+    ) -> None:
         if (
             column_defaults.datatype is not None
             and self.datatype is not column_defaults.datatype
@@ -190,16 +192,18 @@ class CommandOutput(CommandField):
                 )
                 raise
 
-    def __attrs_post_init__(self):
+    def __attrs_post_init__(self) -> None:
         if self.column_defaults.datatype is None:
             self.column_defaults.datatype = self.datatype
 
 
-def datatype_converter(datatype):
-    datatype = ClassResolver(ty.Union[int, float, bool, str, Field])(datatype)
+def dtype_converter(
+    dtype: ty.Union[int, float, bool, str, Field[ty.Any, ty.Any]]
+) -> ty.Union[int, float, bool, str]:
+    datatype = ClassResolver(ty.Union[int, float, bool, str, Field])(dtype)
     if issubclass(datatype, Field):
         datatype = datatype.primitive
-    return datatype
+    return datatype  # type: ignore[no-any-return]
 
 
 @attrs.define(kw_only=True)
@@ -227,8 +231,6 @@ class CommandParameter(CommandField):
         the default value for the parameter, must be able to be
     """
 
-    datatype: ty.Union[int, float, bool, str] = attrs.field(
-        converter=datatype_converter
-    )
+    datatype: ty.Union[int, float, bool, str] = attrs.field(converter=dtype_converter)
     required: bool = False
     default: ty.Any = None

@@ -10,7 +10,7 @@ logger = logging.getLogger("pipeline2app")
 
 
 def extract_file_from_docker_image(
-    image_tag, file_path: PosixPath, out_path: ty.Optional[Path] = None
+    image_tag: str, file_path: PosixPath, out_path: ty.Optional[Path] = None
 ) -> Path:
     """Extracts a file from a Docker image onto the local host
 
@@ -31,7 +31,7 @@ def extract_file_from_docker_image(
         out_path = tmp_dir / "extracted-dir"
     dc = docker.from_env()
 
-    def get_image(tag):
+    def get_image(tag: str) -> ty.Any:
         for img in dc.images.list():
             if tag in img.tags:
                 return img
@@ -101,3 +101,4 @@ def is_relative_to(a: Path, b: Path) -> bool:
 
 
 DOCKER_HUB = "docker.io"
+GITHUB_CONTAINER_REGISTRY = "ghcr.io"

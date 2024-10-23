@@ -64,7 +64,7 @@ def test_native_python_install(tmp_path):
                 },
             },
         },
-        "version": {"package": "1.0", "build": "1"},
+        "version": "1.0",
         "packages": {
             "system": ["vim"],  # just to test it out
             "pip": {"pipeline2app": None, "frametree": None},  # just to test out the
@@ -129,7 +129,7 @@ def test_add_resources(tmp_path):
 
     img = P2AImage(
         name="test-resource-add-image",
-        version={"package": "1.0", "build": "1"},
+        version="1.0",
         packages={
             "system": ["vim"],  # just to test it out
             "pip": {
@@ -251,7 +251,7 @@ def test_multi_command(
             "two_duplicates": two_dup_spec,
             "three_duplicates": three_dup_spec,
         },
-        "version": {"package": "1.0", "build": "1"},
+        "version": "1.0",
         "packages": {
             "system": ["vim"],  # just to test it out
             "pip": {

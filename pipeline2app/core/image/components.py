@@ -5,6 +5,9 @@ import json
 import pkg_resources
 import logging
 from urllib.parse import urlparse
+import re
+from itertools import zip_longest
+from typing_extensions import Self
 import site
 import attrs
 from pipeline2app.core import PACKAGE_NAME
@@ -89,38 +92,6 @@ class BaseImage:
 
 
 @attrs.define
-class Version:
-    """Version of the app, derived from a combination of the underlying package version
-    and the "build version" of the YAML spec"""
-
-    package: str
-    build: ty.Optional[str] = None
-    prerelease: ty.Optional[str] = None
-
-    def __str__(self) -> str:
-        tag = self.package
-        if self.prerelease:
-            tag += "-" + self.prerelease
-        if self.build:
-            tag += "-" + str(self.build)
-        return tag
-
-    def __repr__(self) -> str:
-        rpr = f"Version(package={self.package}"
-        if self.build:
-            rpr += f", build={self.build}"
-        if self.prerelease:
-            rpr += f", prerelease={self.prerelease}"
-        return rpr + ")"
-
-    def build_info(self) -> str:
-        info = self.build if self.build else "0"
-        if self.prerelease:
-            info += f" ({self.prerelease})"
-        return info
-
-
-@attrs.define
 class ContainerAuthor:
 
     name: str
@@ -142,7 +113,7 @@ class Docs:
     description: ty.Optional[str] = None
     known_issues: ty.List[KnownIssue] = attrs.field(
         factory=list,
-        converter=ObjectListConverter(KnownIssue),
+        converter=ObjectListConverter(KnownIssue),  # type: ignore[misc]
         metadata={"serializer": ObjectListConverter.aslist},
     )
 
@@ -153,6 +124,10 @@ class Docs:
             raise ValueError(
                 f"Could not parse info url '{info_url}', please include URL scheme"
             )
+
+
+def optional_path_converter(value: ty.Optional[str]) -> ty.Optional[Path]:
+    return Path(value) if value is not None else None
 
 
 @attrs.define
@@ -184,13 +159,13 @@ class License:
     destination: PurePath = attrs.field(converter=PurePath)
     description: str = attrs.field()
     info_url: str = attrs.field()
-    source: Path = attrs.field(
-        default=None, converter=lambda x: Path(x) if x is not None else None
+    source: ty.Optional[Path] = attrs.field(
+        default=None, converter=optional_path_converter
     )
     store_in_image: bool = False
 
     @info_url.validator
-    def info_url_validator(self, _: attrs.Attribute, info_url: str) -> None:
+    def info_url_validator(self, _: attrs.Attribute[str], info_url: str) -> None:
         parsed = urlparse(info_url)
         if not parsed.scheme or not parsed.netloc:
             raise ValueError(
@@ -214,13 +189,23 @@ class License:
     COLUMN_SUFFIX = "_LICENSE"
 
 
+def base_package_version_converter(v: str) -> str:
+    return str(v) if v is not None else None
+
+
 @attrs.define
 class BasePackage:
 
     name: str
-    version: str = attrs.field(
-        default=None, converter=lambda v: str(v) if v is not None else None
-    )
+    version: str = attrs.field(default=None, converter=base_package_version_converter)
+
+
+def pip_package_extras_converter(
+    extras: ty.Union[str, ty.Iterable[str]]
+) -> ty.List[str]:
+    if isinstance(extras, str):
+        extras = extras.split(",")
+    return list(extras)
 
 
 @attrs.define
@@ -229,7 +214,9 @@ class PipPackage(BasePackage):
 
     url: ty.Optional[str] = None
     file_path: ty.Optional[str] = None
-    extras: ty.List[str] = attrs.field(factory=list)
+    extras: ty.List[str] = attrs.field(
+        factory=list, converter=pip_package_extras_converter
+    )
 
     @classmethod
     def unique(
@@ -254,7 +241,7 @@ class PipPackage(BasePackage):
         Pipeline2appError
             if there is a mismatch between two entries of the same package
         """
-        dct = {}
+        dct: ty.Dict[str, PipPackage] = {}
         for pip_spec in pip_specs:
             if isinstance(pip_spec, dict):
                 pip_spec = PipPackage(**pip_spec)
@@ -327,6 +314,11 @@ class PipPackage(BasePackage):
                 logger.warning(msg + " falling back to installation from PyPI")
                 return self
             raise Pipeline2appBuildError(msg)
+        if pkg.location is None:
+            raise Pipeline2appBuildError(
+                f"Could not find location of package {self.name} in installed working set, "
+                f"{pkg} has no local location"
+            )
         pkg_loc = Path(pkg.location).resolve()
         # Determine whether installed version of requirement is locally
         # installed (and therefore needs to be copied into image) or can
@@ -335,7 +327,7 @@ class PipPackage(BasePackage):
             # Copy package into Docker image and instruct pip to install from
             # that copy
             local_spec = PipPackage(
-                name=self.name, file_path=pkg_loc, extras=self.extras
+                name=self.name, file_path=str(pkg_loc), extras=self.extras
             )
         else:
             # Check to see whether package is installed via "direct URL" instead
@@ -387,7 +379,7 @@ class NeurodockerTemplate:
 
     name: str
     version: str
-    optional_args: ty.Dict[str, ty.Any] = attrs.field(factory=dict)
+    args: ty.Dict[str, ty.Any] = attrs.field(factory=dict)
 
 
 def python_package_converter(
@@ -405,41 +397,12 @@ def python_package_converter(
     )
 
 
-# def neurodocker_template_converter(
-#     templates: ty.List[ty.Union[str, ty.Dict[str, ty.Any]]]
-# ) -> ty.List[NeurodockerTemplate]:
-#         converted: ty.List[NeurodockerTemplate] = []
-#         if value is None:
-#             return converted
-#         if isinstance(value, dict):
-#             for name, item in value.items():
-#                 converted.append(self._create_object(item, name=name))
-#         else:
-#             for item in value:
-#                 converted.append(self._create_object(item))
-#         return converted
-
-#     @classmethod
-#     def asdict(cls, objs: ty.List[ty.Any], **kwargs: ty.Any) -> ty.Dict[str, ty.Any]:
-#         dct = {}
-#         for obj in objs:
-#             obj_dict = attrs.asdict(obj, **kwargs)
-#             dct[obj_dict.pop("name")] = obj_dict
-#         return dct
-
-#     @classmethod
-#     def aslist(cls, objs: ty.List[ty.Any], **kwargs: ty.Any) -> ty.List[ty.Any]:
-#         return [attrs.asdict(obj, **kwargs) for obj in objs]
-
-#     return ObjectListConverter(NeurodockerTemplate)(templates)
-
-
 @attrs.define
 class Packages:
 
     system: ty.List[SystemPackage] = attrs.field(
         factory=list,
-        converter=ObjectListConverter(SystemPackage),
+        converter=ObjectListConverter(SystemPackage),  # type: ignore[misc]
         metadata={"serializer": ObjectListConverter.asdict},
     )
     pip: ty.List[PipPackage] = attrs.field(
@@ -449,12 +412,12 @@ class Packages:
     )
     conda: ty.List[CondaPackage] = attrs.field(
         factory=list,
-        converter=ObjectListConverter(CondaPackage),
+        converter=ObjectListConverter(CondaPackage),  # type: ignore[misc]
         metadata={"serializer": ObjectListConverter.asdict},
     )
     neurodocker: ty.List[NeurodockerTemplate] = attrs.field(
         factory=list,
-        converter=ObjectListConverter(NeurodockerTemplate),
+        converter=ObjectListConverter(NeurodockerTemplate),  # type: ignore[misc]
         metadata={"serializer": ObjectListConverter.asdict},
     )
 
@@ -468,3 +431,148 @@ class Resource:
     name: str
     path: Path  # the path to the resource within the container
     description: str = ""
+
+
+@attrs.define
+class Version:
+
+    release: ty.Union[ty.Tuple[int, ...], str]
+    suffix_label: str = ""
+    suffix_number: int = 0
+
+    @classmethod
+    def parse(cls, version: ty.Union[str, Self]) -> Self:
+        if not isinstance(version, str):
+            if not isinstance(version, cls):
+                raise ValueError(
+                    f"Cannot parse version from object of type {type(version)}"
+                )
+            return version
+        match = cls.version_re.match(version)
+        if match is None:
+            return cls(version)
+        release = match.group("release")
+        try:
+            release = tuple(int(r) for r in release.split("."))
+        except ValueError:
+            pass
+        suffix_label = match.group("suffix_l") or ""
+        if suffix_label and suffix_label not in cls.SUFFIX_LABELS:
+            raise ValueError(
+                f"Invalid suffix label {suffix_label}, must be one of {cls.SUFFIX_LABELS}"
+            )
+        suffix_number = int(match.group("suffix_n")) if match.group("suffix_n") else 0
+        return cls(release, suffix_label, suffix_number)
+
+    @classmethod
+    def tostr(cls, obj: Self, **kwargs: ty.Any) -> str:
+        return str(obj)
+
+    def compare(self, other: "Version") -> int:
+        if (isinstance(self.release, str) and isinstance(other.release, tuple)) or (
+            isinstance(self.release, tuple) and isinstance(other.release, str)
+        ):
+            raise ValueError("Cannot compare versions with different release types")
+
+        if isinstance(self.release, tuple) and isinstance(other.release, tuple):
+            for s, o in zip_longest(self.release, other.release, fillvalue=0):
+                if s < o:
+                    return -1
+                if s > o:
+                    return 1
+        else:
+            if self.release < other.release:  # type: ignore[operator]
+                return -1
+            if self.release > other.release:  # type: ignore[operator]
+                return 1
+        if self.suffix_label == "post" and other.suffix_label != "post":
+            return 1
+        if self.suffix_label != "post" and other.suffix_label == "post":
+            return -1
+        if not self.suffix_label and other.suffix_label:
+            return 1
+        if self.suffix_label and not other.suffix_label:
+            return -1
+        if self.suffix_label:
+            if not other.suffix_label:
+                return 1
+            label_index = self.SUFFIX_LABELS.index(self.suffix_label)
+            other_label_index = self.SUFFIX_LABELS.index(other.suffix_label)
+            if label_index < other_label_index:
+                return -1
+            if label_index > other_label_index:
+                return 1
+            if self.suffix_number < other.suffix_number:
+                return -1
+            if self.suffix_number > other.suffix_number:
+                return 1
+        elif other.suffix_label:
+            return -1
+        return 0
+
+    def __str__(self) -> str:
+        release_str = (
+            ".".join(str(r) for r in self.release)
+            if isinstance(self.release, tuple)
+            else self.release
+        )
+        return release_str + (
+            f"-{self.suffix_label}{self.suffix_number}" if self.suffix_label else ""
+        )
+
+    def __lt__(self, other: "Version") -> bool:
+        return self.compare(other) < 0
+
+    def __le__(self, other: "Version") -> bool:
+        return self.compare(other) <= 0
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, str):
+            try:
+                other_version = Version(other)
+            except ValueError:
+                return False
+        elif not isinstance(other, Version):
+            return False
+        else:
+            other_version = other
+        return self.compare(other_version) == 0
+
+    def __ne__(self, other: object) -> bool:
+        return not (self.release == other)
+
+    def __gt__(self, other: "Version") -> bool:
+        return self.compare(other) > 0
+
+    def __ge__(self, other: "Version") -> bool:
+        return self.compare(other) >= 0
+
+    def __repr__(self) -> str:
+        return f"Version({str(self)})"
+
+    def __hash__(self) -> int:
+        return hash(str(self))
+
+    @classmethod
+    def latest(cls, versions: ty.List[ty.Union[str, "Version"]]) -> "Version":
+        version_objs = [
+            v if isinstance(v, cls) else cls.parse(v) for v in versions  # type: ignore[arg-type]
+        ]
+        return sorted(version_objs)[-1]
+
+    def bump_postfix(self) -> "Version":
+        suffix_label = self.suffix_label if self.suffix_label else "post"
+        suffix_number = self.suffix_number + 1
+        return Version(self.release, suffix_label, suffix_number)
+
+    SUFFIX_LABELS = ["alpha", "beta", "rc", "post"]
+
+    version_re = re.compile(
+        (
+            r"^v?(?P<release>[a-zA-Z0-9_\.]+)"
+            r"(?P<suffix>-(?P<suffix_l>"
+            + "|".join(SUFFIX_LABELS)
+            + r")(?P<suffix_n>[0-9]+)?)?$"
+        ),
+        re.VERBOSE | re.IGNORECASE,
+    )

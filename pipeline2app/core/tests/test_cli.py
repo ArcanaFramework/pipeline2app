@@ -29,7 +29,7 @@ def test_deploy_make_cli(command_spec, cli_runner, work_dir):
     concatenate_spec = {
         "title": "a test image spec",
         "commands": {"test-command": command_spec},
-        "version": {"package": "1.0", "build": "1"},
+        "version": "1.0",
         "packages": {
             "system": ["vim"],  # just to test it out
             "pip": {"pydra": None},  # just to test it out
@@ -70,7 +70,7 @@ def test_deploy_make_cli(command_spec, cli_runner, work_dir):
     )
     assert result.exit_code == 0, show_cli_trace(result)
     tag = result.output.strip().splitlines()[-1]
-    assert tag == f"{DOCKER_REGISTRY}/{DOCKER_ORG}/{IMAGE_GROUP_NAME}.concatenate:1.0-1"
+    assert tag == f"{DOCKER_REGISTRY}/{DOCKER_ORG}/{IMAGE_GROUP_NAME}.concatenate:1.0"
 
     # Clean up the built image
     dc = docker.from_env()
@@ -78,7 +78,7 @@ def test_deploy_make_cli(command_spec, cli_runner, work_dir):
 
 
 # @pytest.mark.xfail(reason="Need to fix the test handle invalid docker tag name used")
-def test_deploy_remake_cli(command_spec, docker_registry, cli_runner, run_prefix):
+def test_deploy_remake_cli(command_spec, local_docker_registry, cli_runner, run_prefix):
     """Tests the check to see whether"""
 
     IMAGE_GROUP_NAME = "testpkg-rebuild" + run_prefix
@@ -101,7 +101,7 @@ def test_deploy_remake_cli(command_spec, docker_registry, cli_runner, run_prefix
                 "--build-dir",
                 str(build_dir),
                 "--registry",
-                docker_registry,
+                local_docker_registry,
                 "--loglevel",
                 "warning",
                 "--use-local-packages",
@@ -118,7 +118,7 @@ def test_deploy_remake_cli(command_spec, docker_registry, cli_runner, run_prefix
     concatenate_spec = {
         "title": "a test image",
         "commands": {"test-command": command_spec},
-        "version": {"package": "1.0", "build": "1"},
+        "version": "1.0",
         "packages": {"system": ["vim"]},
         "name": "test_deploy_rebuild_cli",
         "authors": [{"name": "Some One", "email": "some.one@an.email.org"}],
@@ -143,19 +143,12 @@ def test_deploy_remake_cli(command_spec, docker_registry, cli_runner, run_prefix
         # is a clash)
         concatenate_spec["packages"] = {"system": ["vim", "git"]}
 
-        with pytest.raises(Pipeline2appBuildError) as excinfo:
-            build_spec(concatenate_spec, catch_exceptions=False)
+        result = build_spec(concatenate_spec, catch_exceptions=False)
 
-        assert "doesn't match the one that was used to build the image" in str(
-            excinfo.value
-        )
-
-        # Increment the build number to avoid the clash
-        concatenate_spec["version"]["build"] = "2"
-
-        result = build_spec(concatenate_spec)
+        # Check that the image was rebuilt with an incremented tag
         assert result.exit_code == 0, show_cli_trace(result)
         rebuilt_tag = result.output.strip().splitlines()[-1]
+        assert rebuilt_tag.split(":")[-1] == "1.0-post1"
         dc.images.remove(rebuilt_tag)
     finally:
         # Clean up the built images
@@ -174,8 +167,7 @@ docs_fixtures = {
     "simple": DocsFixture(
         """
 title: a simple app
-version:
-  package: &package_version '0.16.1'
+version: &package_version '0.16.1'
 authors:
   - name: author_name
     email: author@email.org
@@ -213,8 +205,7 @@ weight: 10
 |---|-----|
 |Name|package.spec|
 |Title|a simple app|
-|Package version|0.16.1|
-|Build|0|
+|Version|0.16.1|
 |Base image|`abc:0.16.1`|
 |Maintainer|author_name (author@email.org)|
 |Info URL|https://example.com|
@@ -244,9 +235,7 @@ a test of the YAML join functionality
     "full": DocsFixture(
         """
 title: a more involved image spec
-version:
-  package: &package_version '0.16.1'
-  build: '10'
+version: &package_version '0.16.1'
 authors:
   - name: author_name
     email: author@email.org
@@ -331,12 +320,11 @@ weight: 10
 |---|-----|
 |Name|package.spec|
 |Title|a more involved image spec|
-|Package version|0.16.1|
-|Build|10|
+|Version|0.16.1|
 |Base image|`abc:0.16.1`|
 |Maintainer|author_name (author@email.org)|
 |Info URL|https://example.com|
-|Known issues|https://github.com/myorg/mypackage/issues/644|
+|Known issues|Memory overrun on large file paths (https://github.com/myorg/mypackage/issues/644)|
 
 a longer description
 

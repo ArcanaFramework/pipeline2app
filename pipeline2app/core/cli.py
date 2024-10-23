@@ -22,8 +22,9 @@ from frametree.core.packaging import submodules
 import pipeline2app
 from pipeline2app.core import __version__
 from pipeline2app.core.image import Metapackage, App
-from pipeline2app.core.exceptions import Pipeline2appBuildError
-from pipeline2app.core.utils import extract_file_from_docker_image, DOCKER_HUB
+from pipeline2app.core.utils import (
+    DOCKER_HUB,
+)
 from pipeline2app.core.command import entrypoint_opts
 from pipeline2app.core import PACKAGE_NAME
 
@@ -107,6 +108,7 @@ containing multiple specifications
 )
 @click.option(
     "--install-extras",
+    "install_extras_str",
     type=str,
     default=None,
     help=(
@@ -161,7 +163,7 @@ containing multiple specifications
 @click.option(
     "--check-registry/--dont-check-registry",
     type=bool,
-    default=False,
+    default=None,
     help=(
         "Check the registry to see if an existing image with the "
         "same tag is present, and if so whether the specification "
@@ -256,13 +258,13 @@ def make(
     loglevel: str,
     build_dir: Path,
     use_local_packages: bool,
-    install_extras: str,
+    install_extras_str: str,
     raise_errors: bool,
     generate_only: bool,
     for_localhost: bool,
     license: ty.List[ty.Tuple[str, Path]],
     license_to_download: ty.List[str],
-    check_registry: bool,
+    check_registry: ty.Optional[bool],
     push: bool,
     clean_up: bool,
     resource: ty.List[ty.Tuple[str, str]],
@@ -273,14 +275,17 @@ def make(
     stream_logs: ty.Optional[bool],
 ) -> None:
 
+    if check_registry is None:
+        check_registry = push
+
     if isinstance(spec_path, bytes):  # FIXME: This shouldn't be necessary
         spec_path = Path(spec_path.decode("utf-8"))
     if isinstance(build_dir, bytes):  # FIXME: This shouldn't be necessary
         build_dir = Path(build_dir.decode("utf-8"))
 
     resources: ty.List[ty.Tuple[str, Path]] = []
-    for rname, rpath in resource:
-        rpath = Path(rpath)
+    for rname, rpath_str in resource:
+        rpath = Path(rpath_str)
         if not rpath.exists():
             raise ValueError(
                 f"Resource path {str(rpath)!r} provided to {rname!r} does not exist"
@@ -321,7 +326,9 @@ def make(
     if not build_dir.exists():
         build_dir.mkdir()
 
-    install_extras = install_extras.split(",") if install_extras else []
+    install_extras: ty.List[str] = (
+        install_extras_str.split(",") if install_extras_str else []
+    )
 
     logging.basicConfig(filename=logfile, level=getattr(logging, loglevel.upper()))
 
@@ -354,53 +361,9 @@ def make(
 
     # Check the target registry to see a) if the images with the same tag
     # already exists and b) whether it was built with the same specs
-    if check_registry:
-        conflicting = {}
-        to_build = []
-        for image_spec in image_specs:
-            try:
-                extracted_file = extract_file_from_docker_image(
-                    image_spec.reference, image_spec.IN_DOCKER_SPEC_PATH
-                )
-            except docker.errors.NotFound:
-                extracted_file = None
-            if extracted_file is None:
-                logger.info(
-                    f"Did not find existing image matching {image_spec.reference}"
-                )
-                changelog = None
-            else:
-                logger.info(
-                    f"Comparing build spec with that of existing image {image_spec.reference}"
-                )
-                built_spec = image_spec.load(extracted_file)
 
-                changelog = image_spec.compare_specs(built_spec, check_version=True)
-
-            if changelog is None:
-                to_build.append(image_spec)
-            elif not changelog:
-                logger.info(
-                    "Skipping '%s' build as identical image already "
-                    "exists in registry"
-                )
-            else:
-                conflicting[image_spec.reference] = changelog
-
-        if conflicting:
-            msg = ""
-            for tag, changelog in conflicting.items():
-                msg += (
-                    f"spec for '{tag}' doesn't match the one that was "
-                    "used to build the image already in the registry:\n\n"
-                    + str(changelog.pretty())
-                    + "\n\n\n"
-                )
-
-            raise Pipeline2appBuildError(msg)
-
-        image_specs = to_build
-
+    errors = False
+    manifest: ty.Dict[str, ty.Any] = {}
     if release or save_manifest:
         manifest = {
             "package": package_name,
@@ -409,9 +372,25 @@ def make(
         if release:
             manifest["release"] = ":".join(release)
 
-    errors = False
-
     for image_spec in image_specs:
+        image_reference = image_spec.reference
+        if (
+            check_registry
+            and image_spec.latest_published
+            and image_spec.latest_published >= image_spec.version
+        ):
+            latest_reference = f"{image_spec.path}:{image_spec.latest_published}"
+            if image_spec.matches_image(latest_reference):
+                logger.info(
+                    "Skipping '%s' build as identical image already exists in registry '%s'",
+                    image_reference,
+                    latest_reference,
+                )
+                continue
+            image_reference = (
+                f"{image_spec.path}:{image_spec.latest_published.bump_postfix()}"
+            )
+
         spec_build_dir = (
             build_dir / image_spec.loaded_from.relative_to(spec_path.absolute())
         ).with_suffix("")
@@ -426,35 +405,35 @@ def make(
                 generate_only=generate_only,
                 resources=resources,
                 resources_dir=resources_dir,
+                pipeline2app_install_extras=install_extras,
                 no_cache=clean_up,
                 stream_logs=stream_logs,
+                reference=image_reference,
             )
         except Exception:
             if raise_errors:
                 raise
             logger.error(
-                "Could not build %s pipeline:\n%s", image_spec.reference, format_exc()
+                "Could not build %s pipeline:\n%s", image_reference, format_exc()
             )
             errors = True
             continue
         else:
-            click.echo(image_spec.reference)
-            logger.info("Successfully built %s pipeline", image_spec.reference)
+            click.echo(image_reference)
+            logger.info("Successfully built %s pipeline", image_reference)
 
         if push:
             try:
-                dc.api.push(image_spec.reference)
+                dc.api.push(image_reference)
             except Exception:
                 if raise_errors:
                     raise
                 logger.error(
-                    "Could not push '%s':\n\n%s", image_spec.reference, format_exc()
+                    "Could not push '%s':\n\n%s", image_reference, format_exc()
                 )
                 errors = True
             else:
-                logger.info(
-                    "Successfully pushed '%s' to registry", image_spec.reference
-                )
+                logger.info("Successfully pushed '%s' to registry", image_reference)
         if clean_up:
 
             def remove_image_and_containers(image_ref: str) -> None:
@@ -475,14 +454,15 @@ def make(
                     result["SpaceReclaimed"],
                 )
 
-            remove_image_and_containers(image_spec.reference)
+            remove_image_and_containers(image_reference)
             remove_image_and_containers(image_spec.base_image.reference)
 
         if release or save_manifest:
+            path, tag = image_reference.split(":")
             manifest["images"].append(
                 {
-                    "name": image_spec.path,
-                    "version": image_spec.tag,
+                    "name": path,
+                    "version": tag,
                 }
             )
     if release:
@@ -653,7 +633,7 @@ specified workflows and return them and their versions""",
 )
 @click.argument("task_locations", nargs=-1)
 def required_packages(task_locations: ty.List[str]) -> None:
-    required_modules = set()
+    required_modules: ty.Set[str] = set()
     for task_location in task_locations:
         workflow = ClassResolver(
             TaskBase, alternative_types=[ty.Callable], package=PACKAGE_NAME
@@ -920,9 +900,9 @@ def bootstrap(
     version: str,
     description: str,
     command_task: str,
-    packages_pip: ty.List[ty.Tuple[str, str]],
-    packages_system: ty.List[ty.Tuple[str, str]],
-    packages_neurodocker: ty.List[ty.Tuple[str, str]],
+    packages_pip: ty.List[str],
+    packages_system: ty.List[str],
+    packages_neurodocker: ty.List[str],
     command_inputs: ty.List[ty.Tuple[str, str, str]],
     command_outputs: ty.List[ty.Tuple[str, str, str]],
     command_parameters: ty.List[ty.Tuple[str, str, str]],
@@ -936,7 +916,7 @@ def bootstrap(
     Path(output_file).parent.mkdir(parents=True, exist_ok=True)
 
     def unwrap_fields(
-        fields: ty.List[ty.Tuple[str, str, str]]
+        fields: ty.List[ty.Tuple[str, str]]
     ) -> ty.Dict[str, ty.Dict[str, ty.Any]]:
         fields_dict = {}
         for field_name, attrs_str in fields:
@@ -966,17 +946,14 @@ def bootstrap(
 
     def split_versions(packages: ty.List[str]) -> ty.Dict[str, ty.Optional[str]]:
         return dict(
-            ver_split_re.split(p, maxsplit=1) if "=" in p else [p, None]
+            tuple(ver_split_re.split(p, maxsplit=1)) if "=" in p else (p, None)  # type: ignore[misc]
             for p in packages
         )
 
     spec = {
         "schema_version": App.SCHEMA_VERSION,
         "title": title,
-        "version": {
-            "package": version,
-            "build": 1,
-        },
+        "version": version,
         "registry": registry,
         "docs": {
             "description": description,
