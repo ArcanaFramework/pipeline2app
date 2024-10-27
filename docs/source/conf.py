@@ -140,12 +140,12 @@ html_theme = "furo"
 # documentation.
 html_theme_options = {
     "light_css_variables": {
-        "color-brand-primary": "#cd8237",
-        "color-brand-content": "#cd8237",
+        "color-brand-primary": "#29987f",
+        "color-brand-content": "#29987f",
     },
     "dark_css_variables": {
-        "color-brand-primary": "#ffda88",
-        "color-brand-content": "#ffda88",
+        "color-brand-primary": "#44ffd7",
+        "color-brand-content": "#44ffd7",
     },
 }
 
@@ -161,7 +161,7 @@ html_title = "Pipeline2App v{}".format(__version__)
 
 # The name of an image file (relative to this directory) to place at the top
 # of the sidebar.
-# html_logo = "_static/images/logo_small.png"
+html_logo = "_static/images/logo_small.png"
 
 # The name of an image file (within the static path) to use as favicon of the
 # docs.  This file should be a Windows icon file (.ico) being 16x16 or 32x32
