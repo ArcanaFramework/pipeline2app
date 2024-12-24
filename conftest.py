@@ -13,7 +13,7 @@ from frametree.core.store import Store
 from frametree.core import FrameSet
 from fileformats.text import Plain as PlainText
 from pipeline2app.testing.tasks import (
-    concatenate,
+    Concatenate,
     concatenate_reverse,
     TEST_TASKS,
     BASIC_TASKS,
@@ -236,7 +236,7 @@ def tmp_dir() -> ty.Generator[Path, None, None]:
 @pytest.fixture(params=["forward", "reverse"])
 def concatenate_task(request: pytest.FixtureRequest) -> ty.Callable[..., ty.Any]:
     if request.param == "forward":
-        task = concatenate
+        task = Concatenate
         # FIXME: Can be removed after https://github.com/nipype/pydra/pull/533 is merged
         task.__name__ = "concatenate"
     else:

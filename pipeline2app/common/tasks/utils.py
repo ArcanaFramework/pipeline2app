@@ -1,6 +1,6 @@
 import typing as ty
 import json
-from pydra import mark
+from pydra.design import python
 from pydra.engine.core import File
 from pydra.engine.specs import BaseSpec, SpecInfo
 from pydra.engine.task import FunctionTask
@@ -27,13 +27,12 @@ def identity_task(task_name, fields):
     return task
 
 
-@mark.task
-@mark.annotate({"in_file": FileSet, "return": {"out_file": FileSet}})
-def identity_converter(in_file):
+@python.define(outputs=["out_file"])
+def identity_converter(in_file: FileSet) -> FileSet:
     return in_file
 
 
-@mark.task
+@python.define
 def extract_from_json(in_file: File, field_name: str) -> ty.Any:
     with open(in_file) as f:
         dct = json.load(f)

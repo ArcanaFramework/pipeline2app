@@ -3,7 +3,7 @@ import typing as ty
 from pathlib import Path
 import attrs
 from pydra import ShellCommandTask
-from pydra.engine.specs import SpecInfo, ShellSpec, ShellOutSpec
+from pydra.engine.specs import SpecInfo, ShellSpec, ShellOutputs
 from frametree.core.serialize import ClassResolver, ObjectListConverter
 from fileformats.core import FileSet, DataType, Field
 from pipeline2app.core import PACKAGE_NAME
@@ -271,7 +271,7 @@ def shell(
         executable=executable,
         input_spec=SpecInfo(name="Input", fields=input_fields, bases=(ShellSpec,)),
         output_spec=SpecInfo(
-            name="Output", fields=output_fields, bases=(ShellOutSpec,)
+            name="Output", fields=output_fields, bases=(ShellOutputs,)
         ),
         **kwargs,
     )
