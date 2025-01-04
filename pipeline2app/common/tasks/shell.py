@@ -78,11 +78,11 @@ class ShellCmdInput(ShellCmdField):
     container_path (bool, default: False, only for ContainerTask):
         If True a path will be consider as a path inside the container (and not as a
         local path).
-    output_file_template (str):
+    path_template (str):
         If provided, the field is treated also as an output field and it is added to the
         output spec. The template can use other fields, e.g. {file1}. Used in order to
         create an output specification.
-    output_field_name (str, used together with output_file_template)
+    output_field_name (str, used together with path_template)
         If provided the field is added to the output spec with changed name. Used in
         order to create an output specification.
     keep_extension (bool, default: True):
@@ -126,7 +126,7 @@ class ShellCmdOutput(ShellCmdField):
         the type of the input field
     mandatory : bool, default: False
         If True the output file has to exist, otherwise an error will be raised.
-    output_file_template : str
+    path_template : str
         If provided the output file name (or list of file names) is created using the
         template. The template can use other fields, e.g. {file1}. The same as in input_spec.
     output_field_name : str
@@ -137,7 +137,7 @@ class ShellCmdOutput(ShellCmdField):
         The same as in input_spec.
     requires : list
         List of field names that are required to create a specific output. The fields do not
-        have to be a part of the output_file_template and if any field from the list is not
+        have to be a part of the path_template and if any field from the list is not
         provided in the input, a NOTHING is returned for the specific output. This has a
         different meaning than the requires form the input_spec.
     callable : function
@@ -151,7 +151,7 @@ class ShellCmdOutput(ShellCmdField):
     argstr: bool = attrs.field(default=None, metadata={"input": True})
     mandatory: ty.Optional[bool] = None
     position: int = attrs.field(default=None, metadata={"input": True})
-    output_file_template: ty.Optional[str] = attrs.field()
+    path_template: ty.Optional[str] = attrs.field()
     output_field_name: ty.Optional[str] = None
     keep_extension: bool = attrs.field(default=None, metadata={"input": True})
     requires: ty.Optional[list] = None
@@ -164,8 +164,8 @@ class ShellCmdOutput(ShellCmdField):
         default=None, converter=ClassResolver(allow_none=True, package=PACKAGE_NAME)
     )
 
-    @output_file_template.default
-    def output_file_template_default(self):
+    @path_template.default
+    def path_template_default(self):
         if issubclass(self.datatype, FileSet):
             return self.name + self.datatype.strext
         else:
