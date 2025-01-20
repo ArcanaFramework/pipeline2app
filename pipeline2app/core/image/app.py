@@ -150,6 +150,8 @@ class App(P2AImage):
             build_dir,
         )
 
+        self.make_work_dir(dockerfile)
+
         self.add_entrypoint(dockerfile, build_dir)
 
         return dockerfile
@@ -189,6 +191,12 @@ class App(P2AImage):
                         lic.name,
                         lic.column_path(lic.name),
                     )
+
+    def make_work_dir(self, dockerfile: DockerRenderer) -> None:
+        """Creates the internal work directory for the container and permissives sets
+        permissions"""
+        dockerfile.run("mkdir -p /wl")
+        dockerfile.run("chmod 777 /wl")
 
     @classmethod
     def load(  # type: ignore[override]
